@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Combat</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Title Screen -->
+    <div id="titleScreen" class="screen active">
+        <div class="title-container">
+            <div class="header-1">SPACE COMBAT</div>
+            <p class="subtitle">A Turn-Based Space Combat Game</p>
+            <div id="startButton" class="btn-primary">Start Game</div>
+        </div>
+    </div>
+
+    <!-- Galaxy Map Screen -->
+    <div id="galaxyScreen" class="screen">
+        <div class="galaxy-container">
+            <div class="galaxy-layout">
+                <div class="galaxy-sidebar-left">
+                    <div id="playerStatusPanel" class="system-info"></div>
+                </div>
+
+                <div class="galaxy-main-column">
+                    <div id="galaxyCanvasWrapper" class="galaxy-canvas-wrapper">
+                        <canvas id="galaxyCanvas"></canvas>
+                        <div id="systemTooltip" class="system-tooltip" style="display:none;"></div>
+                        <div class="zoom-controls">
+                            <div id="zoomInButton" class="btn-zoom">+</div>
+                            <div id="zoomResetButton" class="btn-zoom">Reset</div>
+                            <div id="zoomOutButton" class="btn-zoom">−</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="galaxy-sidebar-right">
+                    <div id="currentSystemSection" class="system-section">
+                        <div class="header-3">Current System</div>
+                        <p id="currentSystem">Current System: None</p>
+                        <div id="currentSystemActions" class="station-action-row"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Station Screen -->
+    <div id="stationScreen" class="screen">
+        <div class="station-container">
+            <div class="station-layout">
+                <div class="station-sidebar-left">
+                    <div id="stationPlayerPanel" class="system-info"></div>
+                </div>
+                <div class="station-main">
+                    <div class="header-2">Space Station</div>
+                    <div class="station-menu">
+                        <div class="station-tabs">
+                            <div id="orbitTab" class="station-tab-button active">Orbit</div>
+                            <div id="dockTab" class="station-tab-button">Dock</div>
+                            <div id="shipyardTab" class="station-tab-button">Shipyard</div>
+                        </div>
+                        <div id="stationTabContent" class="station-tab-content"></div>
+                    </div>
+                    <div class="station-action-row" style="margin-top:1em;">
+                        <div id="leaveStationButton" class="btn-secondary">Leave Station</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Combat Screen -->
+    <div id="combatScreen" class="screen">
+        <div class="combat-container">
+            <div class="combat-info">
+                <div class="player-info">
+                    <div class="header-3">Player Fleet</div>
+                    <ul id="playerShipsList" class="ships-list"></ul>
+                </div>
+                <div class="enemy-info">
+                    <div class="header-3">Enemy Fleet</div>
+                    <ul id="enemyShipsList" class="ships-list"></ul>
+                </div>
+            </div>
+            <canvas id="combatCanvas" width="800" height="600"></canvas>
+            <div class="combat-controls">
+                <div id="turnInfo" class="turn-info">Turn: Player</div>
+                <div id="skipTurnButton" class="btn-primary">Skip Turn (Recharge)</div>
+                <div id="retreatButton" class="btn-secondary">Retreat</div>
+                <div id="shipActions" class="ship-actions"></div>
+            </div>
+            <div id="combatContinueButton" class="btn-primary" style="display:none;">Continue</div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameOverScreen" class="screen">
+        <div class="game-over-container">
+            <div id="gameOverTitle" class="header-1">Game Over</div>
+            <p id="gameOverMessage">Message here</p>
+            <button id="gameOverButton" class="btn-primary">Return to Galaxy</button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="utils/Constants.js"></script>
+    <script src="utils/Helpers.js"></script>
+    <script src="entities/Ship.js"></script>
+    <script src="systems/Rendering.js"></script>
+    <script src="systems/GalaxyRendering.js"></script>
+    <script src="systems/UI.js"></script>
+    <script src="systems/Combat.js"></script>
+    <script src="systems/AI.js"></script>
+    <script src="systems/SpaceTravel.js"></script>
+    <script src="systems/Station.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
