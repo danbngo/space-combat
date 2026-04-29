@@ -4,7 +4,9 @@
  * @typedef {{
  *   state: string,
  *   credits: number,
- *   systems: Array<{id:number, name:string, x:number, y:number, hasEnemyFleet:boolean, visited:boolean, resourceLevel:number, connections:number[]}>,
+ *   systems: Array<{id:number, name:string, x:number, y:number, visited:boolean, resourceLevel:number, connections:number[]}>,
+ *   routeFleets: Set<string>,
+ *   combatRouteKey: string|null,
  *   currentSystem: object,
  *   selectedSystem: object|null,
  *   selectedShip: Ship|null,
@@ -28,25 +30,33 @@ const GameController = {
     },
     
     initializeGameState: function() {
+        const systems = SpaceTravel.generateUniverse();
+        const startingSystem = SpaceTravel.initializeStartingSystem(systems);
+        const routeFleets = SpaceTravel.generateRouteFleets(systems);
+
+        // Remove enemy fleets from routes adjacent to the starting system so the player isn't immediately blocked
+        startingSystem.connections.forEach(connId => {
+            routeFleets.delete(getRouteKey(startingSystem.id, connId));
+        });
+
         gameState = {
             state: GAME_STATE.TITLE,
             credits: CONSTANTS.PLAYER_STARTING_CREDITS,
-            systems: SpaceTravel.generateUniverse(),
-            currentSystem: null,
-            selectedSystem: null,
+            systems: systems,
+            routeFleets: routeFleets,
+            combatRouteKey: null,
+            currentSystem: startingSystem,
+            selectedSystem: startingSystem,
             selectedShip: null,
             playerShips: [],
             enemyShips: []
         };
-        
+
         // Initialize player starting fleet
         for (let i = 0; i < CONSTANTS.PLAYER_STARTING_SHIPS; i++) {
             gameState.playerShips.push(new Ship(0, 0, true));
         }
-        
-        // Set starting system
-        gameState.currentSystem = SpaceTravel.initializeStartingSystem(gameState.systems);
-        gameState.selectedSystem = gameState.currentSystem;
+        assignFleetNames(gameState.playerShips);
     },
     
     setupEventListeners: function() {
@@ -85,11 +95,14 @@ const GameController = {
 
         // Window resize handler
         window.addEventListener('resize', () => {
-            if (galaxyRenderer) {
+            if (gameState.state === GAME_STATE.GALAXY && galaxyRenderer) {
                 galaxyRenderer.resizeCanvas();
                 galaxyRenderer.fitGalaxyToCanvas();
                 galaxyRenderer.resetZoom();
                 UISystem.updateGalaxyScreen(gameState);
+            } else if (gameState.state === GAME_STATE.COMBAT && renderingSystem) {
+                renderingSystem.resizeCanvas();
+                renderingSystem.fitArenaToCanvas();
             }
         });
         
@@ -103,6 +116,9 @@ const GameController = {
         document.getElementById('shipyardTab').addEventListener('click', () => {
             UISystem.setStationTab('shipyard', gameState);
         });
+        document.getElementById('modulesTab').addEventListener('click', () => {
+            UISystem.setStationTab('modules', gameState);
+        });
         
         document.getElementById('leaveStationButton').addEventListener('click', () => {
             gameState.state = GAME_STATE.GALAXY;
@@ -111,22 +127,28 @@ const GameController = {
         });
         
         // Combat Screen
-        document.getElementById('skipTurnButton').addEventListener('click', () => {
-            if (combat && gameState.playerShips[combat.currentShipIndex]) {
-                combat.playerSkipTurn(gameState.playerShips[combat.currentShipIndex]);
-                UISystem.updateCombatScreen(gameState, combat);
-            }
+        document.getElementById('combatActionsTab').addEventListener('click', () => {
+            UISystem.combatTab = 'actions';
+            if (combat) UISystem.updateCombatScreen(gameState, combat);
         });
-        
-        document.getElementById('retreatButton').addEventListener('click', () => {
-            if (confirm('Retreat from combat? You will not receive rewards.')) {
-                combat.playerRetreat();
-                this.endCombat();
-            }
+        document.getElementById('combatInfoTab').addEventListener('click', () => {
+            UISystem.combatTab = 'info';
+            if (combat) UISystem.updateCombatScreen(gameState, combat);
         });
-        
-        document.getElementById('combatContinueButton').addEventListener('click', () => {
+
+        document.getElementById('combatResultContinueBtn').addEventListener('click', () => {
+            document.getElementById('combatResultModal').style.display = 'none';
             this.endCombat();
+        });
+
+        document.getElementById('combatZoomInButton').addEventListener('click', () => {
+            if (renderingSystem) renderingSystem.zoomIn();
+        });
+        document.getElementById('combatZoomOutButton').addEventListener('click', () => {
+            if (renderingSystem) renderingSystem.zoomOut();
+        });
+        document.getElementById('combatZoomResetButton').addEventListener('click', () => {
+            if (renderingSystem) renderingSystem.fitArenaToCanvas();
         });
         
         // Game Over Screen
@@ -154,33 +176,190 @@ const GameController = {
     },
     
     travelToSystem: function(targetSystem) {
-        const travelInfo = SpaceTravel.travelToSystem(gameState.currentSystem, targetSystem);
-        gameState.currentSystem = targetSystem;
-        
-        if (travelInfo.hasEncounter && targetSystem.hasEnemyFleet) {
-            // Encounter! Start combat
-            gameState.enemyShips = SpaceTravel.generateEnemyFleet(travelInfo.encounterStrength);
-            this.startCombat();
-        } else {
-            // Safe travel
+        const fromSystem = gameState.currentSystem;
+        const routeKey = getRouteKey(fromSystem.id, targetSystem.id);
+
+        const arrive = () => {
+            SpaceTravel.travelToSystem(fromSystem, targetSystem);
+            SpaceTravel.revealAdjacentSystems(targetSystem, gameState.systems);
+            gameState.currentSystem = targetSystem;
             UISystem.showScreen('galaxyScreen');
             UISystem.updateGalaxyScreen(gameState);
+        };
+
+        if (gameState.routeFleets.has(routeKey)) {
+            galaxyRenderer.animateTravel(fromSystem, targetSystem, () => {
+                this.showEncounterModal(fromSystem, targetSystem, routeKey);
+            }, arrive);
+        } else {
+            galaxyRenderer.animateTravel(fromSystem, targetSystem, null, arrive);
         }
+    },
+
+    showEncounterModal: function(fromSystem, targetSystem, routeKey) {
+        const fleetData = gameState.routeFleets.get(routeKey);
+        const fleetSize = fleetData.size;
+        document.getElementById('encounterModalBody').innerHTML =
+            `<p>An enemy fleet of <strong>${fleetSize} ships</strong> is blocking the route to ${targetSystem.name}!</p>`;
+        document.getElementById('encounterModal').style.display = 'flex';
+
+        document.getElementById('encounterEngageBtn').onclick = () => {
+            document.getElementById('encounterModal').style.display = 'none';
+            SpaceTravel.travelToSystem(fromSystem, targetSystem);
+            SpaceTravel.revealAdjacentSystems(targetSystem, gameState.systems);
+            gameState.currentSystem = targetSystem;
+            gameState.combatRouteKey = routeKey;
+            gameState.enemyShips = SpaceTravel.generateEnemyFleet(fleetSize);
+            this.startCombat();
+        };
+
+        document.getElementById('encounterRetreatBtn').onclick = () => {
+            document.getElementById('encounterModal').style.display = 'none';
+            if (galaxyRenderer) galaxyRenderer._travelAnim = null;
+            UISystem.showScreen('galaxyScreen');
+            UISystem.updateGalaxyScreen(gameState);
+        };
     },
     
     startCombat: function() {
         gameState.state = GAME_STATE.COMBAT;
-        
-        // Create fresh combat instance
+
         combat = new Combat(
-            deepCopy(gameState.playerShips),
-            deepCopy(gameState.enemyShips)
+            gameState.playerShips.map(s => s.clone()),
+            gameState.enemyShips.map(s => s.clone())
         );
-        
+
+        UISystem.combatTab = 'actions';
         UISystem.showScreen('combatScreen');
+
+        // Size canvas to its wrapper, then fit the arena into view
+        renderingSystem.resizeCanvas();
+        renderingSystem.fitArenaToCanvas();
+
+        // Canvas click: mode-gated movement / shooting / ramming
+        renderingSystem.initCombatEventListeners((wx, wy) => {
+            if (!combat || combat.state !== COMBAT_STATE.PLAYER_TURN) {
+                console.log(`[click] ignored: state=${combat?.state}`);
+                return;
+            }
+            if (combat.isAnimating()) {
+                console.log('[click] ignored: animating');
+                return;
+            }
+            const activeShip     = combat.playerShips[combat.currentShipIndex];
+            const clickedShip    = combat.getShipAtPosition(wx, wy);
+            const clickedAsteroid = combat.getAsteroidAtPosition(wx, wy);
+            const mode           = combat.playerMode;
+
+            console.log(`[click] mode=${mode || 'none'} at (${wx.toFixed(0)},${wy.toFixed(0)}) active=${activeShip?.name}(act=${activeShip?.actionsRemaining}) clicked=${clickedShip ? clickedShip.name + (clickedShip.isPlayer ? '[P]' : '[E]') : 'empty'} asteroid=${!!clickedAsteroid}`);
+
+            if (mode === 'fire') {
+                if (clickedAsteroid && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    console.log('[click] → playerShootAtAsteroid');
+                    combat.playerShootAtAsteroid(activeShip, clickedAsteroid);
+                } else {
+                    if (clickedShip) combat.selectedCombatShip = clickedShip;
+                    if (clickedShip && !clickedShip.isPlayer && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                        const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                        const shootRange = combat.getShootRange(activeShip);
+                        const inRange = dist <= shootRange;
+                        const inZone  = isInFiringZone(activeShip, clickedShip);
+                        console.log(`[click] fire check: dist=${dist.toFixed(0)} range=${shootRange.toFixed(0)} inRange=${inRange} inZone=${inZone} rotation=${(activeShip.rotation * 180 / Math.PI).toFixed(1)}°`);
+                        if (inRange && inZone) {
+                            console.log('[click] → playerShootAt');
+                            combat.playerShootAt(activeShip, clickedShip);
+                        } else {
+                            console.log(`[click] fire BLOCKED: ${!inRange ? 'out of range' : 'not in firing zone'}`);
+                        }
+                    } else if (clickedShip) {
+                        console.log(`[click] fire skipped: isPlayer=${clickedShip.isPlayer} actions=${activeShip?.actionsRemaining} alive=${activeShip?.alive}`);
+                    }
+                }
+            } else if (mode === 'move') {
+                if (clickedAsteroid && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    const inOval = isWithinMovementOval(activeShip, clickedAsteroid.x, clickedAsteroid.y);
+                    console.log(`[click] asteroid ram check: inOval=${inOval}`);
+                    if (inOval) {
+                        console.log('[click] → playerRamAsteroid');
+                        combat.playerRamAsteroid(activeShip, clickedAsteroid);
+                    } else {
+                        console.log('[click] asteroid ram BLOCKED: outside movement oval');
+                    }
+                } else if (clickedShip) {
+                    combat.selectedCombatShip = clickedShip;
+                    if (!clickedShip.isPlayer && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                        const inOval = isWithinMovementOval(activeShip, clickedShip.x, clickedShip.y);
+                        console.log(`[click] ram check: inOval=${inOval}`);
+                        if (inOval) {
+                            console.log('[click] → playerRamShip');
+                            combat.playerRamShip(activeShip, clickedShip);
+                        } else {
+                            console.log('[click] ram BLOCKED: target outside movement oval');
+                        }
+                    } else {
+                        console.log(`[click] ram skipped: isPlayer=${clickedShip.isPlayer} actions=${activeShip?.actionsRemaining}`);
+                    }
+                } else if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    const target = clampToMovementOval(activeShip, wx, wy);
+                    console.log(`[click] → playerMoveToPoint (${target.x.toFixed(0)},${target.y.toFixed(0)})`);
+                    combat.playerMoveToPoint(activeShip, target.x, target.y);
+                }
+            } else if (mode === 'blink') {
+                const dist = distance(activeShip.x, activeShip.y, wx, wy);
+                const inRange = dist <= CONSTANTS.BLINK_RANGE;
+                console.log(`[click] blink check: dist=${dist.toFixed(0)} range=${CONSTANTS.BLINK_RANGE} inRange=${inRange}`);
+                if (inRange && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    console.log('[click] → playerBlink');
+                    combat.playerBlink(activeShip, wx, wy);
+                } else {
+                    console.log('[click] blink BLOCKED: ' + (!inRange ? 'out of range' : 'no actions'));
+                }
+            } else if (mode === 'afterburner') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    const maxRange = activeShip.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
+                    const ang  = activeShip.rotation;
+                    const fwdX = Math.cos(ang), fwdY = Math.sin(ang);
+                    const dot  = (wx - activeShip.x) * fwdX + (wy - activeShip.y) * fwdY;
+                    const t    = Math.max(0, Math.min(maxRange, dot));
+                    const tx   = activeShip.x + fwdX * t;
+                    const ty   = activeShip.y + fwdY * t;
+                    console.log(`[click] → playerAfterburner forward t=${t.toFixed(0)} maxRange=${maxRange.toFixed(0)}`);
+                    combat.playerAfterburner(activeShip, tx, ty);
+                }
+            } else if (mode === 'warhead') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    // Clamp click to the targeting circle centered ahead of the ship
+                    const acx = activeShip.x + Math.cos(activeShip.rotation) * CONSTANTS.WARHEAD_LAUNCH_DIST;
+                    const acy = activeShip.y + Math.sin(activeShip.rotation) * CONSTANTS.WARHEAD_LAUNCH_DIST;
+                    const d = distance(acx, acy, wx, wy);
+                    const inside = d <= CONSTANTS.WARHEAD_TARGET_RADIUS;
+                    const tx = inside ? wx : acx + (wx - acx) / d * CONSTANTS.WARHEAD_TARGET_RADIUS;
+                    const ty = inside ? wy : acy + (wy - acy) / d * CONSTANTS.WARHEAD_TARGET_RADIUS;
+                    console.log(`[click] → playerWarhead at (${tx.toFixed(0)},${ty.toFixed(0)}) aimDist=${d.toFixed(0)}`);
+                    combat.playerWarhead(activeShip, tx, ty);
+                }
+            } else if (mode === 'tractor_beam') {
+                if (clickedShip && clickedShip !== activeShip && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    const tractorRange = combat.getTractorBeamRange(activeShip);
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    const inRange = dist <= tractorRange;
+                    const inCone  = isInTractorBeamCone(activeShip, clickedShip);
+                    console.log(`[click] tractor_beam: dist=${dist.toFixed(0)} range=${tractorRange.toFixed(0)} inRange=${inRange} inCone=${inCone}`);
+                    if (inRange && inCone) {
+                        console.log('[click] → playerTractorBeam');
+                        combat.playerTractorBeam(activeShip, clickedShip);
+                    }
+                }
+            } else {
+                // Default: select only
+                if (clickedShip) combat.selectedCombatShip = clickedShip;
+                console.log('[click] select-only mode');
+            }
+
+            UISystem.updateCombatScreen(gameState, combat);
+        });
+
         UISystem.updateCombatScreen(gameState, combat);
-        
-        // Start game loop
         this.startGameLoop();
     },
     
@@ -196,10 +375,9 @@ const GameController = {
         
         if (combat && gameState.state === GAME_STATE.COMBAT) {
             combat.update(deltaTime);
-            UISystem.updateCombatScreen(gameState, combat);
-            
+
             if (combat.state === COMBAT_STATE.ENDED) {
-                document.getElementById('combatContinueButton').style.display = 'block';
+                this.showCombatResultModal();
                 cancelAnimationFrame(animationFrameId);
                 return;
             }
@@ -208,35 +386,99 @@ const GameController = {
         }
     },
     
+    showCombatResultModal: function() {
+        if (!combat) return;
+        const titleEl = document.getElementById('combatResultTitle');
+        const bodyEl  = document.getElementById('combatResultBody');
+
+        const allPlayerShips = [...combat.playerShips, ...combat.fleedPlayerShips];
+        const allEnemyShips  = [...combat.enemyShips,  ...combat.fleedEnemyShips];
+
+        const playerDestroyed = allPlayerShips.filter(s => !s.alive).length;
+        const playerFled      = allPlayerShips.filter(s => s.fled && s.alive).length;
+        const playerSurvived  = allPlayerShips.filter(s => s.alive && !s.fled).length;
+        const enemyDestroyed  = allEnemyShips.filter(s => !s.alive).length;
+        const enemyFled       = allEnemyShips.filter(s => s.fled && s.alive).length;
+        const enemySurvived   = allEnemyShips.filter(s => s.alive && !s.fled).length;
+        const rewards         = combat.getRewards();
+
+        if (combat.won && !combat.playerRetreated) {
+            titleEl.textContent = 'Victory!';
+            titleEl.style.color = '#44ff88';
+        } else if (combat.lost) {
+            titleEl.textContent = 'Defeat';
+            titleEl.style.color = '#ff4444';
+        } else {
+            titleEl.textContent = 'Retreated';
+            titleEl.style.color = '#ffaa44';
+        }
+
+        const playerSummaryParts = [];
+        if (playerSurvived > 0) playerSummaryParts.push(`${playerSurvived} survived`);
+        if (playerFled > 0)     playerSummaryParts.push(`${playerFled} fled`);
+        if (playerDestroyed > 0) playerSummaryParts.push(`${playerDestroyed} destroyed`);
+
+        const enemySummaryParts = [];
+        if (enemyDestroyed > 0) enemySummaryParts.push(`${enemyDestroyed} destroyed`);
+        if (enemyFled > 0)      enemySummaryParts.push(`${enemyFled} fled`);
+        if (enemySurvived > 0)  enemySummaryParts.push(`${enemySurvived} survived`);
+
+        const creditsLine = rewards > 0
+            ? `<p style="color:#ffdd44;margin-top:0.5em;">+${rewards} credits (${enemyDestroyed} × ${CONSTANTS.CREDITS_PER_ENEMY_DESTROYED} cr per kill)</p>`
+            : '';
+
+        bodyEl.innerHTML = `
+            <div style="margin-bottom:0.75em;">
+                <div style="color:#44ccff;font-weight:bold;margin-bottom:0.2em;">Your Fleet</div>
+                <div style="font-size:0.78em;color:#aaa;margin-bottom:0.3em;">${playerSummaryParts.join(' · ')}</div>
+                ${UISystem.renderShipTable(allPlayerShips, { bars: true })}
+            </div>
+            <div style="margin-bottom:0.5em;">
+                <div style="color:#ff6666;font-weight:bold;margin-bottom:0.2em;">Enemy Fleet</div>
+                <div style="font-size:0.78em;color:#aaa;margin-bottom:0.3em;">${enemySummaryParts.join(' · ')}</div>
+                ${UISystem.renderShipTable(allEnemyShips, { bars: true })}
+            </div>
+            ${creditsLine}`;
+
+        document.getElementById('combatResultModal').style.display = 'flex';
+    },
+
     endCombat: function() {
         if (!combat) return;
-        
-        // Update actual game state with combat results
-        gameState.playerShips = combat.playerShips;
+
+        // Update actual game state with combat results (fled player ships survive)
+        gameState.playerShips = [...combat.playerShips, ...combat.fleedPlayerShips];
         gameState.enemyShips = combat.enemyShips;
-        
+
+        cancelAnimationFrame(animationFrameId);
+
         if (combat.won && !combat.playerRetreated) {
-            // Player won
+            // Player won — add rewards, clear route, then resume travel animation to destination
             const rewards = combat.getRewards();
             gameState.credits += rewards;
-            gameState.currentSystem.hasEnemyFleet = false;
-            
-            UISystem.showGameOver(true, `Combat won! You received ${rewards} credits and destroyed ${combat.enemyShips.filter(s => !s.alive).length} enemy ships.`);
-            gameState.state = GAME_STATE.GAME_OVER;
-        } else if (combat.lost || (combat.playerRetreated && combat.playerShips.length === 0)) {
+            if (gameState.combatRouteKey) {
+                gameState.routeFleets.delete(gameState.combatRouteKey);
+                gameState.combatRouteKey = null;
+            }
+            gameState.state = GAME_STATE.GALAXY;
+            UISystem.showScreen('galaxyScreen');
+            if (galaxyRenderer && galaxyRenderer._travelAnim) {
+                galaxyRenderer.resumeTravel();
+            } else {
+                UISystem.updateGalaxyScreen(gameState);
+            }
+        } else if (combat.lost) {
             // Player lost
+            if (galaxyRenderer) galaxyRenderer._travelAnim = null;
             UISystem.showGameOver(false, 'All your ships were destroyed. Game Over!');
             gameState.state = GAME_STATE.GAME_OVER;
         } else if (combat.playerRetreated) {
-            // Player retreated safely
+            // Ships fled combat — already at target system, clear transit animation
+            if (galaxyRenderer) galaxyRenderer._travelAnim = null;
             gameState.state = GAME_STATE.GALAXY;
             UISystem.showScreen('galaxyScreen');
             UISystem.updateGalaxyScreen(gameState);
         }
-        
-        // Clean up
-        cancelAnimationFrame(animationFrameId);
-        document.getElementById('combatContinueButton').style.display = 'none';
     }
 };
 

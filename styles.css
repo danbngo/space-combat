@@ -78,6 +78,12 @@ body {
     padding: 1em;
 }
 
+.galaxy-container {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .system-info, .station-info {
     background-color: rgba(20, 20, 20, 0.7);
     border: 1px solid #ffffff;
@@ -93,27 +99,44 @@ body {
     background-color: rgba(10, 10, 10, 0.8);
     border: 1px solid #ffffff;
     overflow: hidden;
-    height: calc(100vh - 120px); /* Maximize vertical space */
+    flex: 1;
     min-height: 400px;
 }
 
 .galaxy-layout {
     display: grid;
-    grid-template-columns: 1fr 2fr 1fr;
+    grid-template-columns: 1fr 2fr;
     gap: 12px;
-    align-items: start;
+    flex: 1;
+    min-height: 0;
 }
 
-.galaxy-sidebar-left,
-.galaxy-sidebar-right {
+.galaxy-sidebar-left {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    min-height: 0;
+}
+
+.galaxy-fleet-panel {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.galaxy-system-panel {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 12px;
 }
 
 .galaxy-main-column {
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .system-section {
@@ -122,13 +145,20 @@ body {
     padding: 1em;
 }
 
+#currentSystemSection .header-3 {
+    background-color: #006600;
+    color: #ffffff;
+}
+
+#selectedSystemSection .header-3 {
+    background-color: #007777;
+    color: #ffffff;
+}
+
 #selectedSystemActions {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-}
-
-.galaxy-sidebar-left .system-info {
 }
 
 #galaxyCanvas {
@@ -190,7 +220,7 @@ body {
 
 .station-layout {
     display: grid;
-    grid-template-columns: 1fr 2fr;
+    grid-template-columns: 1fr 3fr;
     gap: 12px;
     align-items: start;
 }
@@ -206,6 +236,9 @@ body {
 }
 
 .station-menu {
+    background-color: rgba(20, 20, 20, 0.75);
+    border: 1px solid #ffffff;
+    padding: 1em;
 }
 
 .station-tabs {
@@ -231,8 +264,6 @@ body {
 }
 
 .station-tab-content {
-    background-color: rgba(20, 20, 20, 0.7);
-    border: 1px solid #ffffff;
 }
 
 .station-section {
@@ -286,73 +317,95 @@ body {
     cursor: not-allowed;
 }
 
+.btn-sm {
+    padding: 0.1em 0.5em;
+    font-size: 0.85em;
+    font-weight: normal;
+}
+
 /* Combat Screen */
 .combat-container {
-    width: 95%;
-    max-width: 1200px;
-    background-color: rgba(0, 0, 0, 0.95);
+    width: calc(100% - 20px);
+    max-width: none;
+    background-color: rgba(0, 0, 0, 0.9);
     border: 2px solid #ffffff;
+    min-height: calc(100vh - 20px);
+    max-height: 96vh;
+    padding: 1em;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 15px;
-    max-height: 95vh;
-    overflow-y: auto;
-    padding: 1em;
 }
 
-.combat-info {
+.combat-layout {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    background-color: rgba(20, 20, 20, 0.6);
+    grid-template-columns: 1fr 3fr;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+}
+
+.combat-sidebar-left {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.combat-sidebar-menu {
+    background-color: rgba(20, 20, 20, 0.75);
     border: 1px solid #ffffff;
     padding: 1em;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
-.player-info, .enemy-info {
-    background-color: rgba(15, 15, 15, 0.7);
-    padding: 1em;
+.combat-tab-content {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    padding-top: 0.5em;
 }
 
-.ships-list {
-    list-style: none;
+.combat-log-panel {
+    flex: 0 0 42%;
+    min-height: 0;
+    overflow-y: auto;
+    border-top: 1px solid #2a2a2a;
+    padding: 0.25em 0.25em 0;
+    margin-top: 0.25em;
 }
 
-.ships-list li {
-    background-color: rgba(50, 50, 50, 0.5);
-    border-left: 3px solid #ffffff;
+.combat-main-column {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
 }
 
-.ships-list.enemy li {
-    border-left-color: #ffffff;
+.combat-canvas-wrapper {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background-color: rgba(10, 10, 10, 0.8);
+    border: 1px solid #ffffff;
+    overflow: hidden;
 }
 
 #combatCanvas {
-    border: 2px solid #ffffff;
-    background-color: #000000;
-    margin: 10px auto;
     display: block;
     width: 100%;
-    max-width: 800px;
-    height: auto;
-    aspect-ratio: 4 / 3;
+    height: 100%;
+    cursor: crosshair;
+    background-color: #000000;
 }
 
-.turn-info {
-    text-align: center;
-    color: #ffffff;
-    font-weight: bold;
-    background-color: rgba(30, 30, 30, 0.6);
-    padding: 1em;
-}
-
-.ship-actions {
-    background-color: rgba(20, 20, 20, 0.6);
-    min-height: 50px;
+.combat-action-row {
     display: flex;
     flex-direction: column;
     gap: 5px;
-    padding: 1em;
+    margin-top: 0.5em;
 }
 
 .action-button {
@@ -378,6 +431,104 @@ body {
 
 #gameOverMessage {
     color: #ffffff;
+}
+
+/* Transaction Modal */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.75);
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-box {
+    background-color: rgba(10, 10, 10, 0.97);
+    border: 2px solid #ffffff;
+    padding: 1.5em;
+    min-width: 300px;
+    max-width: 480px;
+    width: 100%;
+    position: relative;
+}
+
+#combatResultModal .modal-box {
+    max-width: 600px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #444;
+    padding-bottom: 0.5em;
+    margin-bottom: 1em;
+}
+
+.modal-title {
+    font-weight: bold;
+    font-size: 1.1em;
+    color: #ffffff;
+}
+
+.modal-close {
+    padding: 0.1em 0.4em;
+    line-height: 1;
+}
+
+.modal-body {
+    margin-bottom: 1.5em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4em;
+}
+
+.modal-body p {
+    margin: 0;
+    color: #cccccc;
+}
+
+.modal-body .modal-credits-row {
+    margin-top: 0.6em;
+    padding-top: 0.6em;
+    border-top: 1px solid #444;
+    color: #ffffff;
+}
+
+.modal-stat-block {
+    border: 1px solid #333;
+    background: rgba(255,255,255,0.04);
+    padding: 0.5em 0.7em;
+    margin: 0.3em 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+}
+
+.modal-stat-ship-label {
+    font-size: 0.8em;
+    color: #888;
+    margin-bottom: 0.3em;
+}
+
+.modal-stat-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1.5em;
+    font-size: 0.9em;
+}
+
+.modal-stat-label {
+    color: #aaa;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
 }
 
 /* Scrollbar styling */
@@ -471,22 +622,14 @@ body {
         grid-template-columns: 1fr;
     }
 
-    .combat-info {
-        grid-template-columns: 1fr;
-    }
-
-    .galaxy-layout {
+    .galaxy-layout,
+    .combat-layout {
         grid-template-columns: 1fr;
     }
 
     .galaxy-sidebar-left,
-    .galaxy-sidebar-right,
     .galaxy-main-column {
         width: 100%;
-    }
-
-    .combat-controls {
-        flex-direction: column;
     }
 
     .btn-primary, .btn-secondary {

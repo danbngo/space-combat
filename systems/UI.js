@@ -1,6 +1,7 @@
 // UI System
 class UISystem {
     static stationTab = 'orbit';
+    static combatTab = 'actions';
     static currentStationOffer = null;
     static selectedOfferIndex = 0;
 
@@ -23,6 +24,7 @@ class UISystem {
 
         this.updatePlayerStatusPanel(gameState);
         this.updateCurrentSystemSection(gameState);
+        this.updateSelectedSystemSection(gameState);
 
         if (galaxyRenderer && gameState.systems) {
             galaxyRenderer.resizeCanvas();
@@ -44,8 +46,9 @@ class UISystem {
     // options.selectedShip — highlights the matching ship row
     // options.bars         — true (default): hull/shield show a bar + current/max
     //                        false: hull/shield show max value as plain text (for stat comparison)
+    // options.isEnemy      — if true, rows get data-enemy-index instead of data-ship-index
     static renderShipTable(ships, options = {}) {
-        const { selectable = false, showStats = false, selectedShip = null, bars = true } = options;
+        const { selectable = false, showStats = false, selectedShip = null, bars = true, isEnemy = false } = options;
 
         const extraHeaders = showStats ? '<th>LZR</th><th>ENG</th><th>RDR</th>' : '';
 
@@ -54,10 +57,14 @@ class UISystem {
             const hullColor = hullPct > 0.5 ? '#00ffff' : hullPct > 0.25 ? '#ffff00' : '#ff3333';
             const isSelected = selectedShip && ship === selectedShip;
             const isDead = !ship.alive;
+            const isFled = ship.fled && ship.alive;
 
+            const nameLabel = ship.name || String(i + 1);
             const numCell = isDead
-                ? `<span style="color:#ff3333;">${i + 1}</span>`
-                : `${i + 1}`;
+                ? `<span style="color:#ff3333;">${nameLabel}</span>`
+                : isFled
+                ? `<span style="color:#ffaa44;">${nameLabel} (fled)</span>`
+                : nameLabel;
 
             const hullCell = bars
                 ? this.renderStatBar(ship.hull, ship.maxHull, hullColor)
@@ -70,14 +77,14 @@ class UISystem {
             const extraCells = showStats ? `
                 <td style="text-align:center;">${ship.laserDamage}</td>
                 <td style="text-align:center;">${ship.engine}</td>
-                <td style="text-align:center;">${(ship.radar * 100).toFixed(0)}%</td>` : '';
+                <td style="text-align:center;">${ship.radar}</td>` : '';
 
             const classes = ['ship-table-row', isSelected ? 'selected' : '', isDead ? 'destroyed' : '']
                 .filter(Boolean).join(' ');
-            const selectAttr = selectable ? `data-ship-index="${i}"` : '';
+            const indexAttr = isEnemy ? `data-enemy-index="${i}"` : (selectable ? `data-ship-index="${i}"` : '');
 
-            return `<tr class="${classes}" ${selectAttr}>
-                <td class="ship-num-cell">${numCell}</td>
+            return `<tr class="${classes}" ${indexAttr}>
+                <td class="ship-num-cell" style="white-space:nowrap;">${numCell}</td>
                 <td>${hullCell}</td>
                 <td>${shieldCell}</td>
                 ${extraCells}
@@ -85,7 +92,7 @@ class UISystem {
         }).join('');
 
         return `<table class="ship-status-table">
-            <thead><tr><th>#</th><th>Hull</th><th>Shield</th>${extraHeaders}</tr></thead>
+            <thead><tr><th>Ship</th><th>Hull</th><th>Shield</th>${extraHeaders}</tr></thead>
             <tbody>${rows}</tbody>
         </table>`;
     }
@@ -93,27 +100,26 @@ class UISystem {
     static renderOfferTable(offers, selectedIdx) {
         const rows = offers.map((offer, i) => {
             const classes = ['ship-table-row', i === selectedIdx ? 'selected' : ''].filter(Boolean).join(' ');
+            const typeLabel = offer.stats.type || String(i + 1);
             return `<tr class="${classes}" data-offer-index="${i}">
-                <td class="ship-num-cell">${i + 1}</td>
+                <td class="ship-num-cell" style="white-space:nowrap;">${typeLabel}</td>
                 <td style="text-align:center;">${offer.stats.hull}</td>
                 <td style="text-align:center;">${offer.stats.shields}</td>
                 <td style="text-align:center;">${offer.stats.laser}</td>
                 <td style="text-align:center;">${offer.stats.engine}</td>
-                <td style="text-align:center;">${(offer.stats.radar * 100).toFixed(0)}%</td>
+                <td style="text-align:center;">${offer.stats.radar}</td>
                 <td style="text-align:center;">${offer.cost}</td>
             </tr>`;
         }).join('');
         return `<table class="ship-status-table">
-            <thead><tr><th>#</th><th>Hull</th><th>Shield</th><th>LZR</th><th>ENG</th><th>RDR</th><th>Cost</th></tr></thead>
+            <thead><tr><th>Ship</th><th>Hull</th><th>Shield</th><th>LZR</th><th>ENG</th><th>RDR</th><th>Cost</th></tr></thead>
             <tbody>${rows}</tbody>
         </table>`;
     }
 
     static renderPlayerStatusHtml(gameState, tableOptions = {}) {
-        const alive = gameState.playerShips.filter(s => s.alive).length;
         return `<div class="header-3">Player Status</div>
                 <p>Credits: ${gameState.credits}</p>
-                <p>Fleet: ${alive} / ${CONSTANTS.PLAYER_STARTING_SHIPS}</p>
                 ${this.renderShipTable(gameState.playerShips, tableOptions)}`;
     }
 
@@ -135,7 +141,8 @@ class UISystem {
             return;
         }
 
-        const actionsHtml = `<button id="showSystemButton" class="btn-primary">Show System</button>`;
+        const isTransiting = typeof galaxyRenderer !== 'undefined' && galaxyRenderer && !!galaxyRenderer._travelAnim;
+        const actionsHtml = `<button id="showSystemButton" class="btn-primary" ${isTransiting ? 'disabled title="Cannot visit station while in transit"' : ''}>Show System</button>`;
         currentActions.innerHTML = actionsHtml;
         this.setupCurrentSystemButtons(gameState);
     }
@@ -147,6 +154,91 @@ class UISystem {
             showButton.onclick = () => {
                 if (!gameState.currentSystem) return;
                 this.openStationTab('orbit', gameState);
+            };
+        }
+    }
+
+    static updateSelectedSystemSection(gameState) {
+        const section = document.getElementById('selectedSystemSection');
+        if (!section) return;
+
+        const sys = gameState.selectedSystem;
+        if (!sys || sys === gameState.currentSystem) {
+            section.style.display = 'none';
+            return;
+        }
+
+        section.style.display = '';
+        const isDirectRoute = gameState.currentSystem.connections &&
+                              gameState.currentSystem.connections.includes(sys.id);
+
+        if (!sys.seen) {
+            document.getElementById('selectedSystemName').textContent = 'Unknown System';
+            document.getElementById('selectedSystemStatus').textContent = 'Status: Unexplored';
+            const actions = document.getElementById('selectedSystemActions');
+            actions.innerHTML = isDirectRoute
+                ? `<button id="travelButton" class="btn-primary">Travel</button>`
+                : '';
+            if (isDirectRoute) {
+                document.getElementById('travelButton').onclick = () => GameController.travelToSystem(sys);
+            }
+            return;
+        }
+
+        document.getElementById('selectedSystemName').textContent = sys.name;
+        document.getElementById('selectedSystemStatus').textContent = sys.visited ? 'Status: Visited' : 'Status: Not Yet Visited';
+
+        const actions = document.getElementById('selectedSystemActions');
+        actions.innerHTML = `
+            ${isDirectRoute ? `<button id="travelButton" class="btn-primary">Travel</button>` : ''}
+            <button id="viewSystemLogButton" class="btn-secondary">View Records</button>
+        `;
+
+        if (isDirectRoute) {
+            document.getElementById('travelButton').onclick = () => GameController.travelToSystem(sys);
+        }
+        document.getElementById('viewSystemLogButton').onclick = () => this.showSystemLog(gameState);
+    }
+
+    static showSystemLog(gameState) {
+        const sys = gameState.selectedSystem;
+        if (!sys) return;
+
+        const playerPanel = document.getElementById('systemLogPlayerPanel');
+        if (playerPanel) playerPanel.innerHTML = this.renderPlayerStatusHtml(gameState);
+
+        document.getElementById('systemLogTitle').textContent = `System Records: ${sys.name}`;
+
+        const content = document.getElementById('systemLogContent');
+        if (sys.visited) {
+            const connections = sys.connections.map(id => {
+                const connected = gameState.systems.find(s => s.id === id);
+                if (!connected) return null;
+                const routeKey = getRouteKey(sys.id, id);
+                const hasPatrol = gameState.routeFleets && gameState.routeFleets.has(routeKey);
+                return connected.name + (hasPatrol ? ' [PATROL]' : '');
+            }).filter(Boolean).join(', ') || 'None';
+            content.innerHTML = `
+                <div class="station-section">
+                    <p><strong>Status:</strong> Visited</p>
+                    <p><strong>Connected systems:</strong> ${connections}</p>
+                    <p><strong>Resource level:</strong> ${sys.resourceLevel}</p>
+                </div>`;
+        } else {
+            content.innerHTML = `
+                <div class="station-section">
+                    <p><strong>Status:</strong> Not Yet Visited</p>
+                    <p>No detailed records. Explore this system to gather intelligence.</p>
+                </div>`;
+        }
+
+        this.showScreen('systemLogScreen');
+
+        const closeBtn = document.getElementById('closeSystemLogButton');
+        if (closeBtn) {
+            closeBtn.onclick = () => {
+                this.showScreen('galaxyScreen');
+                this.updateGalaxyScreen(gameState);
             };
         }
     }
@@ -168,6 +260,8 @@ class UISystem {
     }
 
     static updateStationScreen(gameState) {
+        assignFleetNames(gameState.playerShips);
+
         if ((!gameState.selectedShip || !gameState.playerShips.includes(gameState.selectedShip)) && gameState.playerShips.length) {
             gameState.selectedShip = gameState.playerShips[0];
         }
@@ -206,11 +300,24 @@ class UISystem {
                 </div>`;
         } else if (this.stationTab === 'dock') {
             const repairCost = currentShip ? CONSTANTS.REPAIR_COST : 0;
+            const modList = currentShip && currentShip.modules.length > 0
+                ? currentShip.modules.map(id => {
+                    const m = CONSTANTS.MODULES.find(m => m.id === id);
+                    return m ? m.name : id;
+                  }).join(', ')
+                : 'None';
+            const builtinList = currentShip && (currentShip.builtinModules || []).length > 0
+                ? currentShip.builtinModules.map(id => {
+                    const m = CONSTANTS.MODULES.find(m => m.id === id);
+                    return m ? m.name : id;
+                  }).join(', ')
+                : null;
             contentHtml = `
                 <div class="station-section">
-                    <h3>Docking Bay</h3>
                     ${currentShip ? `
-                        <p>Selected Ship: Hull ${currentShip.hull}/${currentShip.maxHull}, Shields ${currentShip.shields}/${currentShip.maxShields}, Laser ${currentShip.laserDamage}, Engine ${currentShip.engine}</p>
+                        <p><strong>${currentShip.name || '?'}</strong> (${currentShip.shipType || '?'}) — Hull ${currentShip.hull}/${currentShip.maxHull}, Shields ${currentShip.shields}/${currentShip.maxShields}, Laser ${currentShip.laserDamage}, Engine ${currentShip.engine}</p>
+                        ${builtinList ? `<p style="color:#cc99ff;font-size:0.85em;margin-top:-0.5em;">Built-in: ${builtinList}</p>` : ''}
+                        <p style="color:#aaa;font-size:0.85em;margin-top:-0.5em;">Modules (${currentShip.modules.length}/${currentShip.moduleSlots}): ${modList}</p>
                         <div class="station-action-row">
                             <button id="repairButton" class="btn-primary">Repair Ship</button>
                             <button id="sellButton" class="btn-secondary">Sell Ship</button>
@@ -221,13 +328,58 @@ class UISystem {
         } else if (this.stationTab === 'shipyard') {
             contentHtml = `
                 <div class="station-section">
-                    <h3>Shipyard</h3>
                     ${this.renderOfferTable(this.currentStationOffer, this.selectedOfferIndex)}
                     <div class="station-action-row" style="margin-top:0.5em;">
                         <button id="buyButton" class="btn-primary">Buy</button>
                         <button id="tradeButton" class="btn-primary">Trade In</button>
                     </div>
                     ${offer ? `<p class="station-note">Cost: ${offer.cost} cr. Trade-in: ${shipSaleValue} cr. Net: ${tradePrice} cr.</p>` : ''}
+                </div>`;
+        } else if (this.stationTab === 'modules') {
+            const slotsFree = currentShip ? currentShip.moduleSlots - currentShip.modules.length : 0;
+            const builtinIds = currentShip ? (currentShip.builtinModules || []) : [];
+
+            const builtinSummary = builtinIds.length > 0
+                ? builtinIds.map(id => {
+                    const m = CONSTANTS.MODULES.find(m => m.id === id);
+                    return m ? `<span style="color:#cc99ff;background:#1a0033;padding:1px 6px;border-radius:3px;margin-right:4px;">${m.name}</span>` : id;
+                  }).join('')
+                : '<span style="color:#555;">None</span>';
+
+            const installedNames = currentShip && currentShip.modules.length > 0
+                ? currentShip.modules.map(id => {
+                    const m = CONSTANTS.MODULES.find(m => m.id === id);
+                    return m ? m.name : id;
+                  }).join(', ')
+                : 'None';
+
+            const moduleRows = currentShip ? CONSTANTS.MODULES.map(mod => {
+                const isBuiltin  = builtinIds.includes(mod.id);
+                const installed  = currentShip.modules.includes(mod.id);
+                const noSlots    = !isBuiltin && !installed && slotsFree <= 0;
+                const cantAfford = !isBuiltin && !installed && gameState.credits < mod.cost;
+                const disabled   = isBuiltin || installed || noSlots || cantAfford;
+                const label      = isBuiltin ? 'Built-in' : (installed ? 'Installed' : (noSlots ? 'Full' : 'Install'));
+                const rowStyle   = isBuiltin ? 'color:#cc99ff;' : (installed ? 'color:#aaa;' : '');
+                return `<tr style="${rowStyle}">
+                    <td style="white-space:nowrap;">${mod.name}</td>
+                    <td style="color:#aaa;font-size:0.9em;">${mod.desc}</td>
+                    <td style="text-align:right;white-space:nowrap;">${isBuiltin ? '—' : `${mod.cost} cr`}</td>
+                    <td><button class="btn-primary btn-sm" ${disabled ? 'disabled' : ''} data-module-id="${mod.id}">${label}</button></td>
+                </tr>`;
+            }).join('') : '<tr><td colspan="4" style="color:#aaa;">No ship selected.</td></tr>';
+
+            contentHtml = `
+                <div class="station-section">
+                    ${currentShip ? `
+                        <p><strong>${currentShip.name}</strong> — ${currentShip.modules.length}/${currentShip.moduleSlots} slot${currentShip.modules.length === 1 ? '' : 's'} used</p>
+                        <p style="font-size:0.85em;margin-top:-0.3em;">Built-in: ${builtinSummary}</p>
+                        <p style="color:#aaa;font-size:0.85em;margin-top:-0.3em;">Installed: ${installedNames}</p>
+                    ` : '<p>No ship selected.</p>'}
+                    <table class="ship-status-table" style="margin-top:0.5em;width:100%;">
+                        <thead><tr><th>Module</th><th>Effect</th><th>Cost</th><th></th></tr></thead>
+                        <tbody>${moduleRows}</tbody>
+                    </table>
                 </div>`;
         }
 
@@ -245,42 +397,96 @@ class UISystem {
         if (repairButton) {
             repairButton.disabled = !currentShip || gameState.credits < CONSTANTS.REPAIR_COST || currentShip.hull >= currentShip.maxHull;
             repairButton.onclick = () => {
-                if (currentShip && StationSystem.repairShip(gameState, currentShip)) {
-                    this.updateStationScreen(gameState);
-                }
+                if (!currentShip) return;
+                const hullAfter = Math.min(currentShip.maxHull, currentShip.hull + CONSTANTS.REPAIR_AMOUNT);
+                this.showConfirmModal({
+                    title: 'Repair Ship',
+                    lines: [
+                        `Hull: ${currentShip.hull} / ${currentShip.maxHull} → ${hullAfter} / ${currentShip.maxHull}`,
+                        `Cost: ${CONSTANTS.REPAIR_COST} credits`,
+                    ],
+                    creditsBefore: gameState.credits,
+                    creditsAfter: gameState.credits - CONSTANTS.REPAIR_COST,
+                    onConfirm: () => {
+                        if (StationSystem.repairShip(gameState, currentShip)) this.updateStationScreen(gameState);
+                    }
+                });
             };
         }
 
         if (sellButton) {
             sellButton.disabled = !currentShip || gameState.playerShips.length <= 1;
             sellButton.onclick = () => {
-                if (currentShip && StationSystem.sellShip(gameState, currentShip)) {
-                    gameState.selectedShip = gameState.playerShips[0] || null;
-                    this.currentStationOffer = null;
-                    this.updateStationScreen(gameState);
-                }
+                if (!currentShip) return;
+                this.showConfirmModal({
+                    title: 'Sell Ship',
+                    lines: [
+                        `${currentShip.name || '?'} (${currentShip.shipType || '?'})`,
+                        `Hull ${currentShip.hull}/${currentShip.maxHull} · Shields ${currentShip.shields}/${currentShip.maxShields}`,
+                        `Laser ${currentShip.laserDamage} · Engine ${currentShip.engine} · Radar ${currentShip.radar}`,
+                        `Sale value: +${shipSaleValue} credits`,
+                    ],
+                    creditsBefore: gameState.credits,
+                    creditsAfter: gameState.credits + shipSaleValue,
+                    onConfirm: () => {
+                        if (StationSystem.sellShip(gameState, currentShip)) {
+                            gameState.selectedShip = gameState.playerShips[0] || null;
+                            this.currentStationOffer = null;
+                            this.updateStationScreen(gameState);
+                        }
+                    }
+                });
             };
         }
 
         if (buyButton) {
             buyButton.disabled = !offer || gameState.credits < offer.cost || gameState.playerShips.length >= CONSTANTS.PLAYER_STARTING_SHIPS;
             buyButton.onclick = () => {
-                if (offer && StationSystem.buyNewShip(gameState, offer.stats, offer.cost)) {
-                    gameState.selectedShip = gameState.playerShips[gameState.playerShips.length - 1];
-                    this.currentStationOffer = null;
-                    this.updateStationScreen(gameState);
-                }
+                if (!offer) return;
+                this.showConfirmModal({
+                    title: 'Buy Ship',
+                    lines: [
+                        `${offer.stats.type || '?'}`,
+                        `Hull ${offer.stats.hull} · Shields ${offer.stats.shields}`,
+                        `Laser ${offer.stats.laser} · Engine ${offer.stats.engine} · Radar ${offer.stats.radar}`,
+                        `Cost: ${offer.cost} credits`,
+                    ],
+                    creditsBefore: gameState.credits,
+                    creditsAfter: gameState.credits - offer.cost,
+                    onConfirm: () => {
+                        if (StationSystem.buyNewShip(gameState, offer.stats, offer.cost)) {
+                            gameState.selectedShip = gameState.playerShips[gameState.playerShips.length - 1];
+                            this.currentStationOffer = null;
+                            this.updateStationScreen(gameState);
+                        }
+                    }
+                });
             };
         }
 
         if (tradeButton) {
             tradeButton.disabled = !offer || !currentShip || gameState.playerShips.length === 0 || gameState.credits + shipSaleValue < offer.cost;
             tradeButton.onclick = () => {
-                if (offer && currentShip && StationSystem.tradeInShip(gameState, currentShip, offer.stats, offer.cost)) {
-                    gameState.selectedShip = gameState.playerShips[gameState.playerShips.length - 1];
-                    this.currentStationOffer = null;
-                    this.updateStationScreen(gameState);
-                }
+                if (!offer || !currentShip) return;
+                const netCost = Math.max(0, offer.cost - shipSaleValue);
+                this.showConfirmModal({
+                    title: 'Trade In Ship',
+                    lines: [
+                        `Selling: ${currentShip.name || '?'} — trade-in: +${shipSaleValue} credits`,
+                        `Buying: ${offer.stats.type || '?'}`,
+                        `Hull ${offer.stats.hull} · Shields ${offer.stats.shields} · Laser ${offer.stats.laser} · Engine ${offer.stats.engine}`,
+                        `New ship cost: ${offer.cost} credits · Net: ${netCost} credits`,
+                    ],
+                    creditsBefore: gameState.credits,
+                    creditsAfter: gameState.credits - netCost,
+                    onConfirm: () => {
+                        if (StationSystem.tradeInShip(gameState, currentShip, offer.stats, offer.cost)) {
+                            gameState.selectedShip = gameState.playerShips[gameState.playerShips.length - 1];
+                            this.currentStationOffer = null;
+                            this.updateStationScreen(gameState);
+                        }
+                    }
+                });
             };
         }
 
@@ -298,123 +504,307 @@ class UISystem {
                 this.updateStationScreen(gameState);
             });
         });
+
+        document.querySelectorAll('[data-module-id]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (!currentShip) return;
+                const modId = btn.dataset.moduleId;
+                const moduleDef = CONSTANTS.MODULES.find(m => m.id === modId);
+                if (!moduleDef) return;
+
+                const e = moduleDef.effect;
+                const s = currentShip;
+
+                // Compute before/after for each stat
+                const statRow = (label, before, after) => {
+                    const changed = after !== undefined && String(after) !== String(before);
+                    return `<div class="modal-stat-row">
+                        <span class="modal-stat-label">${label}</span>
+                        <span>${before}${changed ? ` → <span style="color:#00ff88;">${after}</span>` : ''}</span>
+                    </div>`;
+                };
+
+                const hullAfter    = e.stat === 'maxHull'    ? `${s.hull + e.amount}/${s.maxHull + e.amount}` : undefined;
+                const shAfter      = e.stat === 'maxShields' ? `${s.shields + e.amount}/${s.maxShields + e.amount}` : undefined;
+                const engAfter     = e.stat === 'engine'     ? s.engine + e.amount : undefined;
+                const radAfter     = e.stat === 'radar'      ? s.radar + e.amount : undefined;
+
+                const extraHtml = `
+                    <div class="modal-stat-block">
+                        <div class="modal-stat-ship-label">${s.name} &nbsp;·&nbsp; ${s.shipType} &nbsp;·&nbsp; slot ${s.modules.length + 1}/${s.moduleSlots}</div>
+                        ${statRow('Hull',    `${s.hull}/${s.maxHull}`,                     hullAfter)}
+                        ${statRow('Shields', `${s.shields}/${s.maxShields}`,               shAfter)}
+                        ${statRow('Laser',   s.laserDamage,                                undefined)}
+                        ${statRow('Engine',  s.engine,                                     engAfter)}
+                        ${statRow('Radar',   s.radar,                                      radAfter)}
+                    </div>`;
+
+                this.showConfirmModal({
+                    title: 'Install Module',
+                    lines: [
+                        `<strong>${moduleDef.name}</strong> — ${moduleDef.desc}`,
+                    ],
+                    extraHtml,
+                    creditsBefore: gameState.credits,
+                    creditsAfter: gameState.credits - moduleDef.cost,
+                    onConfirm: () => {
+                        if (StationSystem.installModule(gameState, currentShip, moduleDef)) {
+                            this.updateStationScreen(gameState);
+                        }
+                    }
+                });
+            });
+        });
     }
     
+    static showConfirmModal({ title, lines, creditsBefore, creditsAfter, extraHtml = '', onConfirm }) {
+        document.getElementById('modalTitle').textContent = title;
+
+        const creditColor = creditsAfter >= creditsBefore ? '#00ff88' : '#ff6666';
+        const body = document.getElementById('modalBody');
+        body.innerHTML = lines.map(l => `<p>${l}</p>`).join('') +
+            extraHtml +
+            `<p class="modal-credits-row">
+                Credits: ${creditsBefore}
+                &nbsp;→&nbsp;
+                <span style="color:${creditColor};">${creditsAfter}</span>
+             </p>`;
+
+        const modal = document.getElementById('stationModal');
+        modal.style.display = 'flex';
+
+        const close = () => { modal.style.display = 'none'; };
+
+        modal.onclick = (e) => { if (e.target === modal) close(); };
+        document.getElementById('modalCloseButton').onclick = close;
+        document.getElementById('modalConfirmButton').onclick = () => { close(); onConfirm(); };
+    }
+
     static generateNewShipStats() {
+        const typeData = CONSTANTS.SHIP_TYPES[Math.floor(Math.random() * CONSTANTS.SHIP_TYPES.length)];
         return {
-            hull: generateRandomStats(CONSTANTS.SHIP_STATS.HULL_MIN, CONSTANTS.SHIP_STATS.HULL_MAX),
-            shields: generateRandomStats(CONSTANTS.SHIP_STATS.SHIELDS_MIN, CONSTANTS.SHIP_STATS.SHIELDS_MAX),
-            laser: generateRandomStats(CONSTANTS.SHIP_STATS.LASER_MIN, CONSTANTS.SHIP_STATS.LASER_MAX),
-            radar: randomFloat(CONSTANTS.SHIP_STATS.RADAR_MIN, CONSTANTS.SHIP_STATS.RADAR_MAX),
-            engine: generateRandomStats(CONSTANTS.SHIP_STATS.ENGINE_MIN, CONSTANTS.SHIP_STATS.ENGINE_MAX)
+            hull: Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.HULL_MIN, CONSTANTS.SHIP_STATS.HULL_MAX) * typeData.hullMult)),
+            shields: Math.max(0, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.SHIELDS_MIN, CONSTANTS.SHIP_STATS.SHIELDS_MAX) * typeData.shieldMult)),
+            laser: Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.LASER_MIN, CONSTANTS.SHIP_STATS.LASER_MAX) * typeData.laserMult)),
+            radar: Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.RADAR_MIN, CONSTANTS.SHIP_STATS.RADAR_MAX) * typeData.radarMult)),
+            engine: Math.max(5, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.ENGINE_MIN, CONSTANTS.SHIP_STATS.ENGINE_MAX) * typeData.engineMult)),
+            type: typeData.type,
         };
     }
     
     static updateCombatScreen(gameState, combat) {
-        // Update turn info
-        const currentPhase = combat.state === COMBAT_STATE.PLAYER_TURN ? 'Player Turn' : 'Enemy Turn';
-        document.getElementById('turnInfo').innerHTML = `
-            Turn: ${currentPhase} | Round: ${combat.round}
-        `;
-        
-        // Update player ships list
-        const playerList = document.getElementById('playerShipsList');
-        playerList.innerHTML = '';
-        gameState.playerShips.forEach((ship, index) => {
-            const li = document.createElement('li');
-            const status = ship.alive ? 'Active' : 'Destroyed';
-            const hullBar = this.createHealthBar(ship.hull, ship.maxHull);
-            const shieldBar = this.createHealthBar(ship.shields, ship.maxShields, 'shield');
-            
-            li.innerHTML = `
-                Ship ${index + 1}: ${status}<br>
-                ${hullBar} Hull<br>
-                ${shieldBar} Shield
-            `;
-            playerList.appendChild(li);
-        });
-        
-        // Update enemy ships list
-        const enemyList = document.getElementById('enemyShipsList');
-        enemyList.innerHTML = '';
-        gameState.enemyShips.forEach((ship, index) => {
-            const li = document.createElement('li');
-            li.classList.add('enemy');
-            const status = ship.alive ? 'Active' : 'Destroyed';
-            const hullBar = this.createHealthBar(ship.hull, ship.maxHull);
-            const shieldBar = this.createHealthBar(ship.shields, ship.maxShields, 'shield');
-            
-            li.innerHTML = `
-                Enemy ${index + 1}: ${status}<br>
-                ${hullBar} Hull<br>
-                ${shieldBar} Shield
-            `;
-            enemyList.appendChild(li);
-        });
-        
-        // Update ship actions
-        this.updateShipActions(gameState, combat);
-    }
-    
-    static createHealthBar(current, max, type = 'hull') {
-        const percentage = (current / max) * 100;
-        const color = type === 'shield' ? '#00ccff' : (percentage > 50 ? '#00ffff' : (percentage > 25 ? '#ffff00' : '#ff0000'));
-        const bar = `[<span style="color: ${color};">${'█'.repeat(Math.ceil(percentage / 10))}${' '.repeat(10 - Math.ceil(percentage / 10))}</span>]`;
-        return `${bar} ${current}/${max}`;
-    }
-    
-    static updateShipActions(gameState, combat) {
-        const actionsDiv = document.getElementById('shipActions');
-        actionsDiv.innerHTML = '';
-        
-        if (combat.state === COMBAT_STATE.PLAYER_TURN) {
-            const currentShip = gameState.playerShips[combat.currentShipIndex];
-            
-            if (currentShip && currentShip.alive) {
-                if (!currentShip.hasMovedThisTurn) {
-                    const validTargets = gameState.playerShips.filter(s => s !== currentShip && s.alive);
-                    
-                    validTargets.forEach((targetShip, index) => {
-                        const button = document.createElement('button');
-                        button.className = 'action-button';
-                        button.textContent = `Move toward Ship ${gameState.playerShips.indexOf(targetShip) + 1}`;
-                        button.onclick = () => combat.moveTowardShip(currentShip, targetShip);
-                        actionsDiv.appendChild(button);
-                    });
+        const panel = document.getElementById('combatSidebarPanel');
+        const logPanel = document.getElementById('combatLogPanel');
+        if (!panel) return;
+
+        // Sync tab button active states
+        const actionsTabEl = document.getElementById('combatActionsTab');
+        const infoTabEl = document.getElementById('combatInfoTab');
+        if (actionsTabEl) actionsTabEl.classList.toggle('active', this.combatTab === 'actions');
+        if (infoTabEl) infoTabEl.classList.toggle('active', this.combatTab === 'info');
+
+        const isPlayerTurn = combat.state === COMBAT_STATE.PLAYER_TURN;
+        const isResolving = combat.state === COMBAT_STATE.RESOLVING || combat.state === COMBAT_STATE.ENEMY_TURN;
+        const activeTurnShip = isPlayerTurn ? combat.playerShips[combat.currentShipIndex] : null;
+        const playerAlive = combat.playerShips.filter(s => s.alive).length;
+        const enemyAlive = combat.enemyShips.filter(s => s.alive).length;
+
+        if (this.combatTab === 'info') {
+            panel.innerHTML = `
+                <div class="header-3" style="background-color:#111;color:#00ffff;">
+                    Player Fleet ${playerAlive}/${combat.playerShips.length}
+                </div>
+                ${this.renderShipTable(combat.playerShips, { selectable: true, selectedShip: combat.selectedCombatShip })}
+                <div class="header-3" style="background-color:#111;color:#ff5555;margin-top:0.5em;">
+                    Enemy Fleet ${enemyAlive}/${combat.enemyShips.length}
+                </div>
+                ${this.renderShipTable(combat.enemyShips, { isEnemy: true, selectedShip: combat.selectedCombatShip })}`;
+
+            // Combat log in the bottom panel on info tab
+            if (logPanel) {
+                const logEntries = combat.combatLog || [];
+                const prevScroll = logPanel.scrollTop;
+                if (logEntries.length > 0) {
+                    logPanel.innerHTML =
+                        `<div class="header-3" style="margin-bottom:0.25em;">Combat Log</div>` +
+                        `<div style="font-size:0.68em;color:#888;line-height:1.55;">` +
+                        logEntries.map(m => `<div>${m}</div>`).join('') +
+                        `</div>`;
+                } else {
+                    logPanel.innerHTML = '';
                 }
-                
-                if (!currentShip.hasActedThisTurn) {
-                    const validEnemies = gameState.enemyShips.filter(s => s.alive);
-                    
-                    validEnemies.forEach((enemy, index) => {
-                        const button = document.createElement('button');
-                        button.className = 'action-button';
-                        button.textContent = `Attack Enemy ${index + 1}`;
-                        button.onclick = () => combat.playerShootAt(currentShip, enemy);
-                        actionsDiv.appendChild(button);
-                    });
-                    
-                    const skipButton = document.createElement('button');
-                    skipButton.className = 'action-button';
-                    skipButton.textContent = `Skip Turn (Recharge +${CONSTANTS.SHIELD_RECHARGE_PER_SKIP} shields)`;
-                    skipButton.onclick = () => combat.playerSkipTurn(currentShip);
-                    actionsDiv.appendChild(skipButton);
-                }
-                
-                const nextButton = document.createElement('button');
-                nextButton.className = 'action-button';
-                nextButton.style.marginTop = '10px';
-                nextButton.style.backgroundColor = 'rgba(0, 150, 0, 0.8)';
-                nextButton.textContent = 'Next Ship';
-                nextButton.onclick = () => combat.nextPlayerShip();
-                actionsDiv.appendChild(nextButton);
+                logPanel.scrollTop = prevScroll;
             }
-        } else if (combat.state === COMBAT_STATE.ENEMY_TURN) {
-            const enemyActionDiv = document.createElement('div');
-            enemyActionDiv.style.textAlign = 'center';
-            enemyActionDiv.textContent = 'Enemy Turn: Deciding...';
-            actionsDiv.appendChild(enemyActionDiv);
+        } else {
+            // Actions tab — active ship + buttons in top panel
+            let activeTurnHtml = '';
+            if (activeTurnShip) {
+                const pips = '●'.repeat(activeTurnShip.actionsRemaining) + '○'.repeat(2 - activeTurnShip.actionsRemaining);
+                activeTurnHtml = `
+                    <div class="header-3" style="background-color:#002200;color:#00ff44;">Active: ${activeTurnShip.name || '?'} <span style="color:#88ff88;font-size:0.85em;letter-spacing:3px;">${pips}</span></div>
+                    ${this.renderShipTable([activeTurnShip], { showStats: true })}`;
+            }
+
+            let actionsHtml = '';
+            if (isPlayerTurn && activeTurnShip && activeTurnShip.alive) {
+                const hasActions  = activeTurnShip.actionsRemaining > 0;
+                const mode        = combat.playerMode;
+                const isAnimating = combat.isAnimating();
+
+                const shootRange     = activeTurnShip.radar * CONSTANTS.SHOOT_RANGE_BASE;
+                const hasValidTargets = combat.enemyShips.some(s =>
+                    s.alive &&
+                    distance(activeTurnShip.x, activeTurnShip.y, s.x, s.y) <= shootRange &&
+                    isInFiringZone(activeTurnShip, s));
+                const rechargeLabel  = (activeTurnShip.maxShields > 0 && activeTurnShip.shields >= activeTurnShip.maxShields)
+                    ? 'Wait' : 'Recharge';
+
+                if (!isAnimating && mode === 'move') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#88ff88;font-size:0.8em;margin-top:0.5em;text-align:center;">Click oval to move · Click enemy to ram</p>`;
+                } else if (!isAnimating && mode === 'fire') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#88ff88;font-size:0.8em;margin-top:0.5em;text-align:center;">Click an enemy in range to fire</p>`;
+                } else if (!isAnimating && mode === 'blink') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#bb88ff;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere within the purple circle to blink</p>`;
+                } else if (!isAnimating && mode === 'afterburner') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ff8800;font-size:0.8em;margin-top:0.5em;text-align:center;">Click along the orange corridor to afterburner-dash forward · damages enemies in path</p>`;
+                } else if (!isAnimating && mode === 'warhead') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ff4444;font-size:0.8em;margin-top:0.5em;text-align:center;">Click within the red targeting circle to set detonation point · blast damages + knocks back all ships in radius</p>`;
+                } else if (!isAnimating && mode === 'tractor_beam') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#00eeff;font-size:0.8em;margin-top:0.5em;text-align:center;">Click a ship within the cyan cone to pull it — target moves to midpoint, you move halfway there</p>`;
+                } else {
+                    const dis     = !hasActions || isAnimating ? 'disabled' : '';
+                    const fireDis = !hasActions || !hasValidTargets || isAnimating ? 'disabled' : '';
+
+                    // Special move buttons — one per move the ship has
+                    const cooldowns = activeTurnShip.specialMoveCooldowns || {};
+                    const specialBtns = (activeTurnShip.specialMoves || []).map(moveId => {
+                        const moveDef = CONSTANTS.SPECIAL_MOVES[moveId];
+                        if (!moveDef) return '';
+                        const cd = cooldowns[moveId] || 0;
+                        const onCd  = cd > 0;
+                        const btnDis = onCd || !hasActions || isAnimating ? 'disabled' : '';
+                        const label  = onCd ? `${moveDef.name} (${cd})` : moveDef.name;
+                        const color  = onCd ? '#555' : '#cc99ff';
+                        return `<button class="btn-primary combat-special-btn" ${btnDis} data-move-id="${moveId}" style="color:${color};">${label}</button>`;
+                    }).join('');
+
+                    actionsHtml = `
+                        <div style="text-align:center;font-size:0.8em;color:#aaa;margin-bottom:0.25em;">Actions: ${activeTurnShip.actionsRemaining}/2</div>
+                        <div class="combat-action-row">
+                            <button id="combatMoveBtn" class="btn-primary" ${dis}>Move</button>
+                            <button id="combatFireBtn" class="btn-primary" ${fireDis}>Fire</button>
+                            <button id="combatSkipBtn" class="btn-secondary" ${dis}>${rechargeLabel}</button>
+                        </div>
+                        ${specialBtns ? `<div class="combat-action-row" style="margin-top:0.3em;">${specialBtns}</div>` : ''}`;
+                }
+            } else if (isResolving) {
+                actionsHtml = `<p style="text-align:center;color:#ffaa00;padding:0.5em 0;">Enemy acting...</p>`;
+            }
+
+            panel.innerHTML = `${activeTurnHtml}${actionsHtml}`;
+
+            // Selected ship in the bottom panel on actions tab
+            if (logPanel) {
+                const sel = combat.selectedCombatShip;
+                if (sel && sel !== activeTurnShip) {
+                    const isAlly = sel.isPlayer;
+                    const headerColor = isAlly ? '#004455' : '#440000';
+                    const badge = isAlly
+                        ? '<span style="color:#00ffff;">[ALLY]</span>'
+                        : '<span style="color:#ff5555;">[ENEMY]</span>';
+                    logPanel.innerHTML = `
+                        <div class="header-3" style="background-color:${headerColor};color:#fff;">Selected: ${sel.name || '?'} ${badge}</div>
+                        ${this.renderShipTable([sel], { showStats: true })}`;
+                } else {
+                    logPanel.innerHTML = '';
+                }
+            }
         }
+
+        this.setupCombatButtons(gameState, combat, activeTurnShip);
+    }
+
+    static setupCombatButtons(gameState, combat, activeTurnShip) {
+        const moveBtn       = document.getElementById('combatMoveBtn');
+        const fireBtn       = document.getElementById('combatFireBtn');
+        const cancelModeBtn = document.getElementById('combatCancelModeBtn');
+        const skipBtn       = document.getElementById('combatSkipBtn');
+
+        if (moveBtn) {
+            moveBtn.onclick = () => {
+                combat.playerMode = 'move';
+                this.updateCombatScreen(gameState, combat);
+            };
+        }
+        if (fireBtn) {
+            fireBtn.onclick = () => {
+                combat.playerMode = 'fire';
+                this.updateCombatScreen(gameState, combat);
+            };
+        }
+        if (cancelModeBtn) {
+            cancelModeBtn.onclick = () => {
+                combat.playerMode = null;
+                this.updateCombatScreen(gameState, combat);
+            };
+        }
+
+        if (skipBtn) {
+            skipBtn.onclick = () => {
+                if (!activeTurnShip) return;
+                combat.playerSkipTurn(activeTurnShip);
+                this.updateCombatScreen(gameState, combat);
+            };
+        }
+
+        document.querySelectorAll('.combat-special-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const moveId = btn.dataset.moveId;
+                combat.playerMode = moveId; // e.g. 'blink'
+                this.updateCombatScreen(gameState, combat);
+            });
+        });
+
+        // Sidebar ship rows — click to select (show stats)
+        document.querySelectorAll('#combatSidebarPanel [data-ship-index]').forEach(row => {
+            row.addEventListener('click', () => {
+                const idx = Number(row.dataset.shipIndex);
+                combat.selectedCombatShip = combat.playerShips[idx] || null;
+                this.updateCombatScreen(gameState, combat);
+            });
+        });
+
+        document.querySelectorAll('#combatSidebarPanel [data-enemy-index]').forEach(row => {
+            row.addEventListener('click', () => {
+                const idx = Number(row.dataset.enemyIndex);
+                combat.selectedCombatShip = combat.enemyShips[idx] || null;
+                this.updateCombatScreen(gameState, combat);
+            });
+        });
     }
     
     static showGameOver(won, message = '') {

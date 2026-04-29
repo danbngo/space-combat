@@ -88,6 +88,15 @@ class StationSystem {
         return Math.max(10, baseValue + hullBonus + shieldBonus + weaponBonus + engineBonus);
     }
 
+    static installModule(gameState, ship, moduleDef) {
+        if (gameState.credits < moduleDef.cost) return false;
+        if (ship.modules.length >= ship.moduleSlots) return false;
+        if (ship.modules.includes(moduleDef.id)) return false;
+        gameState.credits -= moduleDef.cost;
+        ship.installModule(moduleDef);
+        return true;
+    }
+
     static rechargeShields(ships) {
         ships.forEach(ship => {
             ship.rechargeShields(ship.maxShields * 0.5);

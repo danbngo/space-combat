@@ -5,7 +5,7 @@ class Ship {
         this.y = y;
         this.rotation = angle;
         this.isPlayer = isPlayer;
-        
+
         if (stats) {
             this.maxHull = stats.hull;
             this.hull = stats.hull;
@@ -14,24 +14,47 @@ class Ship {
             this.laserDamage = stats.laser;
             this.radar = stats.radar;
             this.engine = stats.engine;
+            this.shipType = stats.type || 'Unknown';
+            this.name = stats.type || 'Unknown';
         } else {
-            // Generate random stats within ranges
-            this.maxHull = generateRandomStats(CONSTANTS.SHIP_STATS.HULL_MIN, CONSTANTS.SHIP_STATS.HULL_MAX);
+            const typeData = CONSTANTS.SHIP_TYPES[Math.floor(Math.random() * CONSTANTS.SHIP_TYPES.length)];
+            this.shipType = typeData.type;
+            this.name = typeData.type;
+
+            this.maxHull = Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.HULL_MIN, CONSTANTS.SHIP_STATS.HULL_MAX) * typeData.hullMult));
             this.hull = this.maxHull;
-            
-            this.maxShields = generateRandomStats(CONSTANTS.SHIP_STATS.SHIELDS_MIN, CONSTANTS.SHIP_STATS.SHIELDS_MAX);
+            this.maxShields = Math.max(0, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.SHIELDS_MIN, CONSTANTS.SHIP_STATS.SHIELDS_MAX) * typeData.shieldMult));
             this.shields = this.maxShields;
-            
-            this.laserDamage = generateRandomStats(CONSTANTS.SHIP_STATS.LASER_MIN, CONSTANTS.SHIP_STATS.LASER_MAX);
-            this.radar = randomFloat(CONSTANTS.SHIP_STATS.RADAR_MIN, CONSTANTS.SHIP_STATS.RADAR_MAX);
-            this.engine = generateRandomStats(CONSTANTS.SHIP_STATS.ENGINE_MIN, CONSTANTS.SHIP_STATS.ENGINE_MAX);
+            this.laserDamage = Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.LASER_MIN, CONSTANTS.SHIP_STATS.LASER_MAX) * typeData.laserMult));
+            this.radar = Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.RADAR_MIN, CONSTANTS.SHIP_STATS.RADAR_MAX) * typeData.radarMult));
+            this.engine = Math.max(5, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.ENGINE_MIN, CONSTANTS.SHIP_STATS.ENGINE_MAX) * typeData.engineMult));
         }
         
         // Combat state
-        this.hasMovedThisTurn = false;
-        this.hasActedThisTurn = false;
+        this.actionsRemaining = 2;
         this.alive = true;
         this.inCombat = false;
+
+        // Modules: builtinModules come with the ship type (no slot cost), modules are purchased
+        this.modules = [];
+        this.moduleSlots = CONSTANTS.MODULE_SLOTS;
+        this.builtinModules = [];
+
+        // Special moves — derived from built-in modules, extended by purchased modules
+        this.specialMoves = [];
+        this.specialMoveCooldowns = {}; // moveId → rounds remaining until usable
+        const _typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === this.shipType);
+        if (_typeData && _typeData.builtinModules) {
+            _typeData.builtinModules.forEach(modId => {
+                this.builtinModules.push(modId);
+                const modDef = CONSTANTS.MODULES.find(m => m.id === modId);
+                if (modDef && modDef.effect && modDef.effect.type === 'special_move') {
+                    if (!this.specialMoves.includes(modDef.effect.move)) {
+                        this.specialMoves.push(modDef.effect.move);
+                    }
+                }
+            });
+        }
         
         // Animations
         this.targetX = x;
@@ -45,13 +68,28 @@ class Ship {
     takeDamage(damage) {
         const absorbedByShields = Math.min(damage, this.shields);
         const remainingDamage = damage - absorbedByShields;
-        
+
         this.shields -= absorbedByShields;
         this.hull -= remainingDamage;
-        
+
         if (this.hull <= 0) {
             this.hull = 0;
             this.alive = false;
+        }
+
+        return { shieldAbsorb: absorbedByShields, hullDmg: remainingDamage };
+    }
+
+    triggerHitFlash(hullDmg, shieldAbsorb) {
+        if (hullDmg > 0) {
+            this._hullFlashStart = Date.now();
+            // Store pre-damage fill pct so bar flashes the width that was filled before the hit
+            this._hullFlashPct = Math.min(1, (this.hull + hullDmg) / this.maxHull);
+        }
+        if (shieldAbsorb > 0) {
+            this._shieldFlashUntil = Date.now() + 180;
+            this._shieldBarFlashStart = Date.now();
+            this._shieldFlashPct = Math.min(1, (this.shields + shieldAbsorb) / this.maxShields);
         }
     }
     
@@ -62,13 +100,33 @@ class Ship {
     rechargeHull(amount) {
         this.hull = Math.min(this.hull + amount, this.maxHull);
     }
-    
-    canMove() {
-        return !this.hasMovedThisTurn && this.alive;
+
+    installModule(moduleDef, quality = 1.0) {
+        this.modules.push({ id: moduleDef.id, quality });
+        const e = moduleDef.effect;
+        const amt = e.amount !== undefined ? Math.max(1, Math.round(e.amount * quality)) : 0;
+        if (e.stat === 'maxHull') {
+            this.maxHull += amt;
+            this.hull = Math.min(this.hull + amt, this.maxHull);
+        } else if (e.stat === 'maxShields') {
+            this.maxShields += amt;
+            this.shields = Math.min(this.shields + amt, this.maxShields);
+        } else if (e.stat === 'radar') {
+            this.radar = Math.max(1, this.radar + amt);
+        } else if (e.stat === 'engine') {
+            this.engine += amt;
+        // 'bonus_action' has no immediate stat change
+        } else if (e.type === 'special_move') {
+            if (!this.specialMoves.includes(e.move)) this.specialMoves.push(e.move);
+        }
     }
-    
+
+    canMove() {
+        return this.actionsRemaining > 0 && this.alive;
+    }
+
     canAct() {
-        return !this.hasActedThisTurn && this.alive;
+        return this.actionsRemaining > 0 && this.alive;
     }
     
     getAccuracy() {
@@ -88,55 +146,50 @@ class Ship {
         this.targetY = this.y + Math.sin(angle) * moveDistance;
         this.targetRotation = angle;
         
-        this.hasMovedThisTurn = true;
         this.isMoving = true;
     }
-    
+
     rotateTo(angle) {
         this.targetRotation = angle;
     }
-    
+
     resetTurn() {
-        this.hasMovedThisTurn = false;
-        this.hasActedThisTurn = false;
+        this.actionsRemaining = 2;
     }
-    
-    shootAt(targetShip) {
+
+    shootAt(targetShip, maxRange) {
         this.isShooting = true;
         this.shootingTarget = targetShip;
-        this.hasActedThisTurn = true;
-        
-        // Calculate accuracy
-        const isHit = Math.random() < this.getAccuracy();
-        let damage = 0;
-        
-        if (isHit) {
-            // Vary damage slightly
-            damage = this.laserDamage + randomInt(-3, 3);
-            damage = Math.max(1, damage); // Minimum 1 damage
+
+        let hitChance = 1;
+        if (maxRange !== undefined && maxRange > 0) {
+            const dist = distance(this.x, this.y, targetShip.x, targetShip.y);
+            hitChance = 1 - (Math.min(1, dist / maxRange) * 0.5);
         }
-        
-        return {
-            hit: isHit,
-            damage: damage,
-            shooter: this,
-            target: targetShip
-        };
+
+        const isHit = Math.random() < hitChance;
+        let damage = 0;
+
+        if (isHit) {
+            damage = this.laserDamage + randomInt(-3, 3);
+            damage = Math.max(1, damage);
+        }
+
+        return { hit: isHit, damage, shooter: this, target: targetShip };
     }
-    
+
     skipTurn() {
-        this.hasActedThisTurn = true;
-        const rechargeAmount = CONSTANTS.SHIELD_RECHARGE_PER_SKIP;
-        this.rechargeShields(rechargeAmount);
+        this.actionsRemaining = Math.max(0, this.actionsRemaining - 1);
+        this.rechargeShields(Math.floor(this.engine / 2));
     }
-    
+
+    clone() {
+        const s = Object.create(Ship.prototype);
+        Object.assign(s, this);
+        return s;
+    }
+
     getStatus() {
-        return {
-            alive: this.alive,
-            hull: this.hull,
-            shields: this.shields,
-            canMove: this.canMove(),
-            canAct: this.canAct()
-        };
+        return { alive: this.alive, hull: this.hull, shields: this.shields, actionsRemaining: this.actionsRemaining };
     }
 }

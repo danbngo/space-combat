@@ -21,7 +21,20 @@
         <div class="galaxy-container">
             <div class="galaxy-layout">
                 <div class="galaxy-sidebar-left">
-                    <div id="playerStatusPanel" class="system-info"></div>
+                    <div id="playerStatusPanel" class="system-info galaxy-fleet-panel"></div>
+                    <div class="galaxy-system-panel">
+                        <div id="currentSystemSection" class="system-section">
+                            <div class="header-3">Current System</div>
+                            <p id="currentSystem">Current System: None</p>
+                            <div id="currentSystemActions" class="station-action-row"></div>
+                        </div>
+                        <div id="selectedSystemSection" class="system-section" style="display:none;">
+                            <div class="header-3">Selected System</div>
+                            <p id="selectedSystemName"></p>
+                            <p id="selectedSystemStatus"></p>
+                            <div id="selectedSystemActions" class="station-action-row"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="galaxy-main-column">
@@ -33,14 +46,6 @@
                             <div id="zoomResetButton" class="btn-zoom">Reset</div>
                             <div id="zoomOutButton" class="btn-zoom">−</div>
                         </div>
-                    </div>
-                </div>
-
-                <div class="galaxy-sidebar-right">
-                    <div id="currentSystemSection" class="system-section">
-                        <div class="header-3">Current System</div>
-                        <p id="currentSystem">Current System: None</p>
-                        <div id="currentSystemActions" class="station-action-row"></div>
                     </div>
                 </div>
             </div>
@@ -55,17 +60,16 @@
                     <div id="stationPlayerPanel" class="system-info"></div>
                 </div>
                 <div class="station-main">
-                    <div class="header-2">Space Station</div>
                     <div class="station-menu">
+                        <div class="header-2">Space Station</div>
                         <div class="station-tabs">
                             <div id="orbitTab" class="station-tab-button active">Orbit</div>
                             <div id="dockTab" class="station-tab-button">Dock</div>
                             <div id="shipyardTab" class="station-tab-button">Shipyard</div>
+                            <div id="modulesTab" class="station-tab-button">Modules</div>
+                            <div id="leaveStationButton" class="btn-secondary">Leave Station</div>
                         </div>
                         <div id="stationTabContent" class="station-tab-content"></div>
-                    </div>
-                    <div class="station-action-row" style="margin-top:1em;">
-                        <div id="leaveStationButton" class="btn-secondary">Leave Station</div>
                     </div>
                 </div>
             </div>
@@ -75,24 +79,49 @@
     <!-- Combat Screen -->
     <div id="combatScreen" class="screen">
         <div class="combat-container">
-            <div class="combat-info">
-                <div class="player-info">
-                    <div class="header-3">Player Fleet</div>
-                    <ul id="playerShipsList" class="ships-list"></ul>
+            <div class="combat-layout">
+                <div class="combat-sidebar-left">
+                    <div class="combat-sidebar-menu">
+                        <div class="station-tabs">
+                            <div id="combatActionsTab" class="station-tab-button active">Actions</div>
+                            <div id="combatInfoTab" class="station-tab-button">Info</div>
+                        </div>
+                        <div id="combatSidebarPanel" class="combat-tab-content"></div>
+                        <div id="combatLogPanel" class="combat-log-panel"></div>
+                    </div>
                 </div>
-                <div class="enemy-info">
-                    <div class="header-3">Enemy Fleet</div>
-                    <ul id="enemyShipsList" class="ships-list"></ul>
+                <div class="combat-main-column">
+                    <div id="combatCanvasWrapper" class="combat-canvas-wrapper">
+                        <canvas id="combatCanvas"></canvas>
+                        <div class="zoom-controls">
+                            <div id="combatZoomInButton" class="btn-zoom">+</div>
+                            <div id="combatZoomResetButton" class="btn-zoom">Reset</div>
+                            <div id="combatZoomOutButton" class="btn-zoom">−</div>
+                        </div>
+                    </div>
+                    <div id="combatContinueButton" class="btn-primary" style="display:none;">Continue</div>
                 </div>
             </div>
-            <canvas id="combatCanvas" width="800" height="600"></canvas>
-            <div class="combat-controls">
-                <div id="turnInfo" class="turn-info">Turn: Player</div>
-                <div id="skipTurnButton" class="btn-primary">Skip Turn (Recharge)</div>
-                <div id="retreatButton" class="btn-secondary">Retreat</div>
-                <div id="shipActions" class="ship-actions"></div>
+        </div>
+    </div>
+
+    <!-- System Log Screen -->
+    <div id="systemLogScreen" class="screen">
+        <div class="station-container">
+            <div class="station-layout">
+                <div class="station-sidebar-left">
+                    <div id="systemLogPlayerPanel" class="system-info"></div>
+                </div>
+                <div class="station-main">
+                    <div class="station-menu">
+                        <div class="header-2" id="systemLogTitle">System Records</div>
+                        <div class="station-tabs">
+                            <div id="closeSystemLogButton" class="btn-secondary">Back to Galaxy</div>
+                        </div>
+                        <div id="systemLogContent"></div>
+                    </div>
+                </div>
             </div>
-            <div id="combatContinueButton" class="btn-primary" style="display:none;">Continue</div>
         </div>
     </div>
 
@@ -105,10 +134,52 @@
         </div>
     </div>
 
+    <!-- Enemy Encounter Modal -->
+    <div id="encounterModal" class="modal-backdrop" style="display:none;">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="encounterModalTitle" class="modal-title">Enemy Fleet Encountered</span>
+            </div>
+            <div id="encounterModalBody" class="modal-body"></div>
+            <div class="modal-footer">
+                <button id="encounterEngageBtn" class="btn-primary">Engage!</button>
+                <button id="encounterRetreatBtn" class="btn-secondary">Turn Back</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction Confirmation Modal -->
+    <div id="stationModal" class="modal-backdrop" style="display:none;">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="modalTitle" class="modal-title"></span>
+                <button id="modalCloseButton" class="modal-close btn-secondary">✕</button>
+            </div>
+            <div id="modalBody" class="modal-body"></div>
+            <div class="modal-footer">
+                <button id="modalConfirmButton" class="btn-primary">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Combat Result Modal -->
+    <div id="combatResultModal" class="modal-backdrop" style="display:none;">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="combatResultTitle" class="modal-title"></span>
+            </div>
+            <div id="combatResultBody" class="modal-body"></div>
+            <div class="modal-footer">
+                <button id="combatResultContinueBtn" class="btn-primary">Continue</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="utils/Constants.js"></script>
     <script src="utils/Helpers.js"></script>
     <script src="entities/Ship.js"></script>
+    <script src="entities/Asteroid.js"></script>
     <script src="systems/Rendering.js"></script>
     <script src="systems/GalaxyRendering.js"></script>
     <script src="systems/UI.js"></script>

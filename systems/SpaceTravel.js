@@ -47,6 +47,43 @@ class SpaceTravel {
         return nearby.sort((a, b) => a.distance - b.distance);
     }
 
+    // For each system, find the closest route it is NOT an endpoint of, log the distance.
+    // Algorithm: point-to-segment projection — project P onto segment AB via
+    //   t = clamp(((P−A)·(B−A)) / |AB|², 0, 1), closest point Q = A + t(B−A), dist = |P−Q|
+    static logRouteProximities(systems) {
+        const clearance = CONSTANTS.MIN_SYSTEM_ROUTE_CLEARANCE;
+        let violations = 0;
+        const rows = [];
+
+        for (const sys of systems) {
+            let minDist = Infinity;
+            let minRoute = '—';
+
+            for (const a of systems) {
+                if (!a.connections) continue;
+                for (const bId of a.connections) {
+                    if (bId <= a.id) continue; // each route once
+                    if (sys.id === a.id || sys.id === bId) continue;
+                    const b = systems.find(s => s.id === bId);
+                    if (!b) continue;
+                    const d = distancePointToLineSegment(sys.x, sys.y, a.x, a.y, b.x, b.y);
+                    if (d < minDist) { minDist = d; minRoute = `${a.name} → ${b.name}`; }
+                }
+            }
+
+            const ok = minDist >= clearance;
+            if (!ok) violations++;
+            rows.push({ name: sys.name, minDist: minDist === Infinity ? '∞' : minDist.toFixed(1), minRoute, ok });
+        }
+
+        console.groupCollapsed(`[Galaxy] Route clearance report — threshold ${clearance}px — ${violations} violation(s) in ${systems.length} systems`);
+        rows.forEach(r => {
+            const tag = r.ok ? '✓' : '✗ VIOLATION';
+            console.log(`  ${tag}  ${r.name.padEnd(30)} nearest non-own route: ${String(r.minDist).padStart(6)}px  (${r.minRoute})`);
+        });
+        console.groupEnd();
+    }
+
     static generateUniverse() {
         let attempts = 0;
         let systems = null;
@@ -60,7 +97,8 @@ class SpaceTravel {
 
                 if (this.isGalaxyConnected(systems)) {
                     if (this.verifyGalaxyConstraints(systems)) {
-                        console.log(`Galaxy generated successfully with ${systems.length} systems`);
+                        console.log(`Galaxy generated successfully with ${systems.length} systems after ${attempts + 1} attempt(s)`);
+                        this.logRouteProximities(systems);
                         return systems;
                     }
                 }
@@ -102,8 +140,8 @@ class SpaceTravel {
                     name: getRandomSystemName(),
                     x: x,
                     y: y,
-                    hasEnemyFleet: randomBool(CONSTANTS.ENEMY_FLEET_SPAWN_CHANCE),
                     visited: false,
+                    seen: false,
                     resourceLevel: randomInt(1, 10),
                     connections: []
                 });
@@ -116,15 +154,32 @@ class SpaceTravel {
         // Phase 2.5: Ensure all nearby systems are connected
         this.enforceProximityConnections(systems);
 
-        // Phase 3: Remove systems that don't meet minimum connectivity
-        const connectedSystems = systems.filter(system =>
-            system.connections.length >= CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM
-        );
+        // Phase 3: Remove underconnected systems, remap IDs, repeat until stable
+        let valid = systems.filter(s => s.connections.length >= CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM);
+        let prevLen = -1;
+        while (valid.length !== prevLen) {
+            prevLen = valid.length;
+            const idMap = new Map(valid.map((sys, idx) => [sys.id, idx]));
+            valid.forEach((sys, idx) => {
+                sys.id = idx;
+                sys.connections = sys.connections
+                    .map(oldId => idMap.get(oldId))
+                    .filter(newId => newId !== undefined);
+            });
+            valid = valid.filter(s => s.connections.length >= CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM);
+        }
 
-        // Re-index
-        connectedSystems.forEach((sys, idx) => sys.id = idx);
+        return valid;
+    }
 
-        return connectedSystems;
+    // Returns true if any non-endpoint system violates MIN_SYSTEM_ROUTE_CLEARANCE for segment s1→s2
+    static routeViolatesClearance(s1, s2, systems) {
+        const clearance = CONSTANTS.MIN_SYSTEM_ROUTE_CLEARANCE;
+        for (const sys of systems) {
+            if (sys.id === s1.id || sys.id === s2.id) continue;
+            if (distancePointToLineSegment(sys.x, sys.y, s1.x, s1.y, s2.x, s2.y) < clearance) return true;
+        }
+        return false;
     }
 
     static buildConnectedGraph(systems) {
@@ -132,9 +187,6 @@ class SpaceTravel {
         const MAX_DIST = CONSTANTS.MAX_TRAVEL_DISTANCE;
         const MIN_CONN = CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM;
         const MAX_CONN = CONSTANTS.MAX_CONNECTIONS_PER_SYSTEM;
-        // Higher value = more lenient about lanes passing near other systems.
-        // Was tuned up 15x from original to allow enough connections in dense galaxies.
-        const ROUTE_PROXIMITY_THRESHOLD = CONSTANTS.ROUTE_PROXIMITY_THRESHOLD;
 
         const possibleConnections = new Map();
         systems.forEach(sys1 => {
@@ -144,21 +196,18 @@ class SpaceTravel {
                 if (sys1.id !== sys2.id) {
                     const dist = distance(sys1.x, sys1.y, sys2.x, sys2.y);
                     if (dist >= MIN_DIST && dist <= MAX_DIST) {
-                        const nearbyCount = this.getSystemsNearRoute(sys1, sys2, systems, ROUTE_PROXIMITY_THRESHOLD).length;
+                        // Hard-filter: skip routes that pass within MIN_SYSTEM_ROUTE_CLEARANCE of any non-endpoint system
+                        if (this.routeViolatesClearance(sys1, sys2, systems)) return;
                         possibleConnections.get(sys1.id).push({
                             systemId: sys2.id,
                             distance: dist,
-                            proximityIssues: nearbyCount
                         });
                     }
                 }
             });
 
-            // Prefer clean routes, then shorter distance
-            possibleConnections.get(sys1.id).sort((a, b) => {
-                if (a.proximityIssues !== b.proximityIssues) return a.proximityIssues - b.proximityIssues;
-                return a.distance - b.distance;
-            });
+            // Prefer shorter routes
+            possibleConnections.get(sys1.id).sort((a, b) => a.distance - b.distance);
         });
 
         // Phase 1: Ensure minimum connectivity
@@ -257,6 +306,9 @@ class SpaceTravel {
                 if (routedThrough) continue;
             }
 
+            // Skip the direct fallback connection if it violates clearance
+            if (this.routeViolatesClearance(sys1, sys2, systems)) continue;
+
             if (sys1.connections.length < MAX_CONN && sys2.connections.length < MAX_CONN) {
                 if (!this.wouldConnectionIntersect(sys1, sys2, systems)) {
                     sys1.connections.push(sys2.id);
@@ -314,8 +366,6 @@ class SpaceTravel {
     }
 
     static verifyGalaxyConstraints(systems) {
-        const MAX_DIST = CONSTANTS.MAX_TRAVEL_DISTANCE;
-
         for (let sys of systems) {
             if (sys.connections.length < CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM ||
                 sys.connections.length > CONSTANTS.MAX_CONNECTIONS_PER_SYSTEM) {
@@ -330,12 +380,9 @@ class SpaceTravel {
                 if (dist < CONSTANTS.MIN_TRAVEL_DISTANCE || dist > CONSTANTS.MAX_TRAVEL_DISTANCE) return false;
 
                 if (!connSys.connections.includes(sys.id)) return false;
-            }
 
-            for (let other of systems) {
-                if (other.id === sys.id) continue;
-                const dist = distance(sys.x, sys.y, other.x, other.y);
-                if (dist <= MAX_DIST && !sys.connections.includes(other.id)) return false;
+                // Hard-fail if any non-endpoint system is within clearance distance of this route
+                if (this.routeViolatesClearance(sys, connSys, systems)) return false;
             }
         }
 
@@ -404,7 +451,16 @@ class SpaceTravel {
     static initializeStartingSystem(systems) {
         const startingSystem = systems[0];
         startingSystem.visited = true;
+        this.revealAdjacentSystems(startingSystem, systems);
         return startingSystem;
+    }
+
+    static revealAdjacentSystems(system, systems) {
+        system.seen = true;
+        (system.connections || []).forEach(connId => {
+            const adj = systems.find(s => s.id === connId);
+            if (adj) adj.seen = true;
+        });
     }
 
     static getReachableSystems(fromSystem, allSystems) {
@@ -430,14 +486,34 @@ class SpaceTravel {
         };
     }
 
-    static generateEnemyFleet(strength = 1) {
-        const fleetSize = Math.min(CONSTANTS.ENEMY_STARTING_SHIPS + strength - 1, CONSTANTS.MAX_ENEMY_FLEET_SIZE);
-        const fleet = [];
+    static generateRouteFleets(systems) {
+        const fleets = new Map();
+        const seen = new Set();
 
-        for (let i = 0; i < fleetSize; i++) {
+        systems.forEach(sys => {
+            sys.connections.forEach(connId => {
+                const key = getRouteKey(sys.id, connId);
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    if (randomBool(CONSTANTS.ENEMY_FLEET_SPAWN_CHANCE)) {
+                        const strength = randomInt(1, 3);
+                        const size = Math.min(CONSTANTS.ENEMY_STARTING_SHIPS + strength - 1, CONSTANTS.MAX_ENEMY_FLEET_SIZE);
+                        const shipType = CONSTANTS.SHIP_TYPES[Math.floor(Math.random() * CONSTANTS.SHIP_TYPES.length)].type;
+                        fleets.set(key, { size, shipType });
+                    }
+                }
+            });
+        });
+
+        return fleets;
+    }
+
+    static generateEnemyFleet(size) {
+        const fleet = [];
+        for (let i = 0; i < size; i++) {
             fleet.push(new Ship(0, 0, false));
         }
-
+        assignFleetNames(fleet);
         return fleet;
     }
 }

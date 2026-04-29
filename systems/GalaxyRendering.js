@@ -10,6 +10,8 @@ class GalaxyRenderer {
         this.mouseX = 0;
         this.mouseY = 0;
         this.hoveredSystem = null;
+        this.hoveredRouteFleet = null;
+        this.routeFleetDots = [];
         this.selectedSystem = null;
         this.isDragging = false;
         this.dragged = false;
@@ -31,6 +33,12 @@ class GalaxyRenderer {
         this.minZoom = CONSTANTS.GALAXY_MIN_ZOOM;
         this.maxZoom = CONSTANTS.GALAXY_MAX_ZOOM;
         
+        this._stars = Array.from({ length: 200 }, () => ({
+            x: Math.random(), y: Math.random(),
+            b: Math.floor(180 + Math.random() * 76)
+        }));
+        this.visibleUnseenIds = new Set();
+
         // Don't fit/reset zoom here - will be done after canvas is properly sized
         this.setupEventListeners();
     }
@@ -189,23 +197,105 @@ class GalaxyRenderer {
         if (oldHovered && (!this.hoveredSystem || this.hoveredSystem.id !== oldHovered.id)) {
             console.log(`[GalaxyMouse] UNHOVER: mouse(screen: ${this.mouseX.toFixed(1)}, ${this.mouseY.toFixed(1)}) canvas(${galaxyX.toFixed(1)}, ${galaxyY.toFixed(1)}) unhovered "${oldHovered.name}"`);
             this.scheduleTooltipHide();
-            // Re-render to remove hover color
             if (typeof gameState !== 'undefined') {
                 this.render(gameState.systems, gameState.currentSystem);
             }
         }
-        
+
         if (this.hoveredSystem && (!oldHovered || oldHovered.id !== this.hoveredSystem.id)) {
             console.log(`[GalaxyMouse] HOVER: mouse(screen: ${this.mouseX.toFixed(1)}, ${this.mouseY.toFixed(1)}) canvas(${galaxyX.toFixed(1)}, ${galaxyY.toFixed(1)}) hovered "${this.hoveredSystem.name}"`);
             this.scheduleTooltipShow();
-            // Re-render to show hover color change
+            if (typeof gameState !== 'undefined') {
+                this.render(gameState.systems, gameState.currentSystem);
+            }
+        }
+
+        // Fleet dot hover (only when no system is hovered)
+        const oldFleet = this.hoveredRouteFleet;
+        this.hoveredRouteFleet = this.hoveredSystem ? null : this.getRouteFleetAtPosition(this.mouseX, this.mouseY);
+        if (this.hoveredRouteFleet !== oldFleet) {
             if (typeof gameState !== 'undefined') {
                 this.render(gameState.systems, gameState.currentSystem);
             }
         }
     }
     
+    animateTravel(fromSystem, toSystem, onMidpoint, onComplete) {
+        this._travelAnim = { from: fromSystem, to: toSystem, progress: 0, onComplete };
+
+        const runSegment = (startPct, endPct, onDone) => {
+            const segDur = (endPct - startPct) * CONSTANTS.GALAXY_TRAVEL_ANIM_DURATION;
+            const start = performance.now();
+            const tick = (now) => {
+                if (!this._travelAnim) return;
+                const t = Math.min(1, (now - start) / segDur);
+                this._travelAnim.progress = startPct + (endPct - startPct) * t;
+                this.render(gameState.systems, fromSystem);
+                if (t < 1) requestAnimationFrame(tick);
+                else onDone();
+            };
+            requestAnimationFrame(tick);
+        };
+
+        if (onMidpoint) {
+            runSegment(0, 0.5, () => { if (this._travelAnim) onMidpoint(); });
+        } else {
+            runSegment(0, 1, () => {
+                const cb = this._travelAnim && this._travelAnim.onComplete;
+                this._travelAnim = null;
+                if (cb) cb();
+            });
+        }
+    }
+
+    resumeTravel() {
+        if (!this._travelAnim) return;
+        const fromSystem = this._travelAnim.from;
+        const segDur = CONSTANTS.GALAXY_TRAVEL_ANIM_DURATION / 2;
+        const start = performance.now();
+        const tick = (now) => {
+            if (!this._travelAnim) return;
+            const t = Math.min(1, (now - start) / segDur);
+            this._travelAnim.progress = 0.5 + 0.5 * t;
+            this.render(gameState.systems, fromSystem);
+            if (t < 1) {
+                requestAnimationFrame(tick);
+            } else {
+                const cb = this._travelAnim.onComplete;
+                this._travelAnim = null;
+                if (cb) cb();
+            }
+        };
+        requestAnimationFrame(tick);
+    }
+
+    drawTravelingShip(from, to, progress) {
+        const leaderShip = typeof gameState !== 'undefined'
+            ? gameState.playerShips.find(s => s.alive)
+            : null;
+        const typeData = leaderShip
+            ? CONSTANTS.SHIP_TYPES.find(t => t.type === leaderShip.shipType)
+            : null;
+        const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
+
+        const zx = this.scaleX * this.zoom;
+        const zy = this.scaleY * this.zoom;
+        const sx = this.translateX + (from.x + (to.x - from.x) * progress) * zx;
+        const sy = this.translateY + (from.y + (to.y - from.y) * progress) * zy;
+        const angle = Math.atan2(to.y - from.y, to.x - from.x);
+        const S = 8;
+
+        this.ctx.save();
+        this.ctx.translate(sx, sy);
+        this.ctx.rotate(angle);
+        this.ctx.fillStyle = '#00ff88';
+        drawShipShape(this.ctx, verts, S);
+        this.ctx.fill();
+        this.ctx.restore();
+    }
+
     onClick(e) {
+        if (this._travelAnim) return;
         if (this.dragged) {
             this.dragged = false;
             return;
@@ -228,8 +318,9 @@ class GalaxyRenderer {
         if (clickedSystem) {
             const oldSelected = this.selectedSystem;
             this.selectedSystem = clickedSystem;
+            if (typeof gameState !== 'undefined') gameState.selectedSystem = clickedSystem;
             console.log(`[GalaxyMouse] click selected: canvas (${x.toFixed(1)}, ${y.toFixed(1)}) galaxy (${galaxyX.toFixed(1)}, ${galaxyY.toFixed(1)}) system "${clickedSystem.name}" (${oldSelected ? 'was: ' + oldSelected.name : 'was: nothing'})`);
-            
+
             // Center on the selected system and re-render
             if (typeof gameState !== 'undefined' && clickedSystem) {
                 this.centerOnSystem(clickedSystem);
@@ -238,8 +329,9 @@ class GalaxyRenderer {
         } else {
             const old = this.selectedSystem;
             this.selectedSystem = null;
+            if (typeof gameState !== 'undefined') gameState.selectedSystem = null;
             console.log(`[GalaxyMouse] click on nothing: canvas (${x.toFixed(1)}, ${y.toFixed(1)}) galaxy (${galaxyY.toFixed(1)}, ${galaxyY.toFixed(1)}) ${old ? 'deselected ' + old.name : 'nothing was selected'}`);
-            
+
             // Re-render for deselection
             if (typeof gameState !== 'undefined') {
                 this.render(gameState.systems, gameState.currentSystem);
@@ -248,8 +340,8 @@ class GalaxyRenderer {
 
         // Update UI only for non-visual changes (like updating the current system section)
         if (selectionChanged && typeof gameState !== 'undefined' && typeof UISystem !== 'undefined') {
-            // Only update the UI elements that don't affect zoom/camera
             UISystem.updateCurrentSystemSection(gameState);
+            UISystem.updateSelectedSystemSection(gameState);
         }
     }
     
@@ -258,10 +350,10 @@ class GalaxyRenderer {
             console.log(`[GalaxyMouse] LEAVE: mouse(screen: ${this.mouseX.toFixed(1)}, ${this.mouseY.toFixed(1)}) left canvas, unhovered "${this.hoveredSystem.name}"`);
         }
         this.hoveredSystem = null;
+        this.hoveredRouteFleet = null;
         this.scheduleTooltipHide();
         this.isDragging = false;
         this.dragged = false;
-        // Re-render to remove hover color
         if (typeof gameState !== 'undefined') {
             this.render(gameState.systems, gameState.currentSystem);
         }
@@ -323,6 +415,7 @@ class GalaxyRenderer {
         let closestDist = hitRadius;
         
         for (let system of window.galaxyMapSystems) {
+            if (!system.seen && !this.visibleUnseenIds.has(system.id)) continue;
             const dist = distance(x, y, system.x, system.y);
             if (dist <= hitRadius) {
                 closest = system;
@@ -367,6 +460,9 @@ class GalaxyRenderer {
             }
         }
         
+        // Draw route fleet dots on top of all lines
+        this.drawAllRouteFleetDots();
+
         // Draw all systems
         systems.forEach(system => {
             const isReachable = currentSystem.connections && currentSystem.connections.includes(system.id);
@@ -377,8 +473,15 @@ class GalaxyRenderer {
             this.drawSystem(system, isReachable, isHovered, isSelected, isCurrent);
         });
         
-        // Draw tooltip if hovering and tooltip is scheduled to be visible
-        if (this.tooltipVisible && this.hoveredSystem) {
+        // Draw traveling ship on top of everything
+        if (this._travelAnim) {
+            this.drawTravelingShip(this._travelAnim.from, this._travelAnim.to, this._travelAnim.progress);
+        }
+
+        // Draw tooltip
+        if (this.hoveredRouteFleet) {
+            this.updateRouteFleetTooltip(this.hoveredRouteFleet);
+        } else if (this.tooltipVisible && this.hoveredSystem) {
             this.updateTooltip(this.hoveredSystem, currentSystem);
         } else if (!this.tooltipVisible) {
             this.hideTooltip();
@@ -388,35 +491,94 @@ class GalaxyRenderer {
     clear() {
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Draw border
+        this._stars.forEach(s => {
+            this.ctx.fillStyle = `rgb(${s.b},${s.b},${s.b})`;
+            this.ctx.fillRect(s.x * this.canvas.width, s.y * this.canvas.height, 1, 1);
+        });
         this.ctx.strokeStyle = '#00ffff';
         this.ctx.lineWidth = 2;
         this.ctx.strokeRect(0, 0, this.canvas.width, this.canvas.height);
     }
     
     drawAllConnections(systems) {
-        // Draw all connections as gray
-        this.ctx.strokeStyle = '#808080';
-        this.ctx.lineWidth = 1;
-        
         const drawnPairs = new Set();
-        
+        this.routeFleetDots = [];
+        this.visibleUnseenIds = new Set();
+
         systems.forEach(system => {
             if (system.connections) {
                 system.connections.forEach(connId => {
-                    // Create a unique key for this pair to avoid drawing twice
-                    const pairKey = [system.id, connId].sort().join('-');
+                    const pairKey = getRouteKey(system.id, connId);
                     if (!drawnPairs.has(pairKey)) {
+                        drawnPairs.add(pairKey);
                         const otherSystem = systems.find(s => s.id === connId);
                         if (otherSystem) {
-                            this.drawConnectionLine(system, otherSystem, '#808080');
-                            drawnPairs.add(pairKey);
+                            if (system.seen && otherSystem.seen) {
+                                this.drawConnectionLine(system, otherSystem, '#808080');
+                                if (typeof gameState !== 'undefined' && gameState.routeFleets && gameState.routeFleets.has(pairKey)) {
+                                    const zx = this.scaleX * this.zoom;
+                                    const zy = this.scaleY * this.zoom;
+                                    const fleetData = gameState.routeFleets.get(pairKey);
+                                    this.routeFleetDots.push({
+                                        key: pairKey,
+                                        x: this.translateX + (system.x + otherSystem.x) / 2 * zx,
+                                        y: this.translateY + (system.y + otherSystem.y) / 2 * zy,
+                                        size: fleetData.size,
+                                        shipType: fleetData.shipType,
+                                        angle: Math.atan2(otherSystem.y - system.y, otherSystem.x - system.x)
+                                    });
+                                }
+                            } else if (system.seen || otherSystem.seen) {
+                                this.drawConnectionLine(system, otherSystem, '#2a2a3a');
+                                if (!system.seen) this.visibleUnseenIds.add(system.id);
+                                if (!otherSystem.seen) this.visibleUnseenIds.add(otherSystem.id);
+                            }
                         }
                     }
                 });
             }
         });
+    }
+
+    drawAllRouteFleetDots() {
+        const fallbackVerts = [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
+        for (const dot of this.routeFleetDots) {
+            const isHovered = this.hoveredRouteFleet && this.hoveredRouteFleet.key === dot.key;
+            const S = isHovered ? 10 : 7;
+            const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === dot.shipType);
+            const verts = typeData ? typeData.vertices : fallbackVerts;
+            this.ctx.save();
+            this.ctx.translate(dot.x, dot.y);
+            this.ctx.rotate(dot.angle);
+            this.ctx.fillStyle = isHovered ? '#ff9999' : '#ff4444';
+            drawShipShape(this.ctx, verts, S);
+            this.ctx.fill();
+            if (isHovered) {
+                this.ctx.strokeStyle = '#ffaaaa';
+                this.ctx.lineWidth = 1.5;
+                this.ctx.stroke();
+            }
+            this.ctx.restore();
+        }
+    }
+
+    getRouteFleetAtPosition(screenX, screenY) {
+        const HIT_RADIUS = 10;
+        for (const dot of this.routeFleetDots) {
+            const dx = screenX - dot.x;
+            const dy = screenY - dot.y;
+            if (dx * dx + dy * dy <= HIT_RADIUS * HIT_RADIUS) return dot;
+        }
+        return null;
+    }
+
+    updateRouteFleetTooltip(fleet) {
+        const tooltip = document.getElementById('systemTooltip');
+        if (!tooltip) return;
+        tooltip.innerHTML = `<strong>Enemy Fleet</strong><br>Ships: ${fleet.size}`;
+        tooltip.style.left = (this.mouseX + 10) + 'px';
+        tooltip.style.top  = (this.mouseY + 10) + 'px';
+        tooltip.style.display = 'block';
     }
     
     drawCurrentSystemConnections(systems, currentSystem) {
@@ -516,8 +678,23 @@ class GalaxyRenderer {
         const zoomedScaleY = this.scaleY * this.zoom;
         const x = this.translateX + system.x * zoomedScaleX;
         const y = this.translateY + system.y * zoomedScaleY;
-        
         const fixedRadius = CONSTANTS.GALAXY_SYSTEM_RADIUS;
+
+        if (!system.seen) {
+            if (!this.visibleUnseenIds.has(system.id)) return;
+            this.ctx.fillStyle = '#2a2a44';
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, fixedRadius, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.fillStyle = '#6666aa';
+            this.ctx.font = `bold ${Math.round(fixedRadius * 1.4)}px Courier New`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            this.ctx.fillText('?', x, y);
+            this.ctx.textAlign = 'left';
+            this.ctx.textBaseline = 'alphabetic';
+            return;
+        }
         
         // Determine color based on new scheme
         let color;
@@ -555,33 +732,40 @@ class GalaxyRenderer {
             this.ctx.stroke();
         }
         
-        // Draw enemy marker if has enemy fleet
-        if (system.hasEnemyFleet && !isCurrent) {
-            this.ctx.fillStyle = '#ff3333';
-            const markerSize = 2;
-            this.ctx.fillRect(x + fixedRadius + 2, y - markerSize, 4, markerSize * 2);
-        }
     }
     
     updateTooltip(system, currentSystem) {
         const tooltip = document.getElementById('systemTooltip');
         if (!tooltip) return;
-        
+
+        if (!system.seen) {
+            tooltip.innerHTML = `<strong>Unknown System</strong><br>Unexplored territory`;
+            tooltip.style.left = (this.mouseX + 10) + 'px';
+            tooltip.style.top = (this.mouseY + 10) + 'px';
+            tooltip.style.display = 'block';
+            return;
+        }
+
         const dist = distance(currentSystem.x, currentSystem.y, system.x, system.y);
         const reachable = dist <= CONSTANTS.MAX_TRAVEL_DISTANCE;
         const travelInfo = reachable ? `Distance: ${dist.toFixed(0)} ly` : `Too far: ${dist.toFixed(0)} ly`;
-        
+
         let html = `<strong>${system.name}</strong><br>`;
         html += `${travelInfo}<br>`;
-        html += `Visited: ${system.visited ? 'Yes' : 'No'}<br>`;
-        html += `Enemy Fleet: ${system.hasEnemyFleet ? 'Yes' : 'No'}`;
-        
+        html += `Visited: ${system.visited ? 'Yes' : 'No'}`;
+
+        const isConnected = currentSystem.connections && currentSystem.connections.includes(system.id);
+        if (isConnected && typeof gameState !== 'undefined' && gameState.routeFleets) {
+            const routeKey = getRouteKey(currentSystem.id, system.id);
+            html += `<br>Enemy Patrol: ${gameState.routeFleets.has(routeKey) ? 'Yes' : 'No'}`;
+        }
+
         if (!reachable) {
             html += '<br><span style="color: #ff6600;">Out of range</span>';
         }
-        
+
         tooltip.innerHTML = html;
-        
+
         // Position tooltip at mouse
         tooltip.style.left = (this.mouseX + 10) + 'px';
         tooltip.style.top = (this.mouseY + 10) + 'px';
