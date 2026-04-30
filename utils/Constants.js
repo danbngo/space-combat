@@ -63,7 +63,7 @@ const CONSTANTS = {
     // Station
     REPAIR_COST: 50,
     REPAIR_AMOUNT: 50,
-    NEW_SHIP_BASE_COST: 200,
+    NEW_SHIP_BASE_COST: 800,
     STATION_OFFER_COUNT: 4,
     CREDITS_PER_ENEMY_DESTROYED: 100,
 
@@ -76,9 +76,11 @@ const CONSTANTS = {
         { id: 'engine_upgrade', name: 'Engine Upgrade',   cost: 175, desc: '+15 engine power',                     effect: { stat: 'engine',     amount: 15 } },
         { id: 'combat_ai',      name: 'Combat AI',        cost: 300, desc: '25% chance: +1 action at start of turn', effect: { type: 'bonus_action', chance: 0.25 } },
         { id: 'blink_drive',       name: 'Blink Drive',   cost: 275, desc: 'Grants Blink: teleport up to 80px in any direction', effect: { type: 'special_move', move: 'blink' } },
-        { id: 'afterburner_drive', name: 'Afterburner',       cost: 300, desc: 'Grants Afterburner: straight-line dash 1.5× normal range, damages enemies in path', effect: { type: 'special_move', move: 'afterburner' } },
-        { id: 'warhead_launcher',    name: 'Warhead Launcher',  cost: 350, desc: 'Grants Warhead: area-blast missile fired forward; damages + knocks back ships in blast radius', effect: { type: 'special_move', move: 'warhead' } },
+        { id: 'afterburner_drive', name: 'Afterburner',       cost: 300, desc: 'Grants Afterburner: straight-line dash at full range, damages enemies in path', effect: { type: 'special_move', move: 'afterburner' } },
+        { id: 'warhead_launcher',    name: 'Warhead Launcher',  cost: 350, desc: 'Grants Warhead: area-blast missile fired forward; damages + knocks back all ships in blast radius', effect: { type: 'special_move', move: 'warhead' } },
         { id: 'tractor_beam_emitter', name: 'Tractor Beam',    cost: 275, desc: 'Grants Tractor Beam: pull any ship in forward cone — target moves to midpoint, you move 50% there', effect: { type: 'special_move', move: 'tractor_beam' } },
+        { id: 'emp_blast_drive',   name: 'EMP Blaster',    cost: 400, desc: 'Grants EMP Blast: instantly damages shields and maxes ability cooldowns on all ships within blast radius', effect: { type: 'special_move', move: 'emp_blast' } },
+        { id: 'cloak_drive',       name: 'Cloak Drive',    cost: 450, desc: 'Grants Cloak: become untargetable by lasers and ramming for 2–4 rounds; revealed by taking damage or acting', effect: { type: 'special_move', move: 'cloak' } },
     ],
 
     // UI
@@ -128,6 +130,7 @@ const CONSTANTS = {
         {
             type: 'Cruiser',
             hullMult: 1.2, shieldMult: 1.2, laserMult: 1.0, radarMult: 0.9, engineMult: 0.9,
+            builtinModules: ['cloak_drive'],
             // balanced warship with prominent mid-body wings
             vertices: [[1.8, 0], [1.2, -0.6], [0.4, -1.3], [-0.6, -1.3], [-1.5, -0.5], [-1.5, 0.5], [-0.6, 1.3], [0.4, 1.3], [1.2, 0.6]],
         },
@@ -148,6 +151,7 @@ const CONSTANTS = {
         {
             type: 'Carrier',
             hullMult: 2.0, shieldMult: 1.8, laserMult: 0.6, radarMult: 0.7, engineMult: 0.5,
+            builtinModules: ['emp_blast_drive'],
             // broad flying-wing, reduced from original ±2.5
             vertices: [[1.0, 0], [0.5, -0.9], [-0.2, -1.7], [-1.2, -1.8], [-2.0, 0], [-1.2, 1.8], [-0.2, 1.7], [0.5, 0.9]],
         },
@@ -164,8 +168,9 @@ const CONSTANTS = {
 
     // Special moves
     BLINK_RANGE: 80,            // px radius of blink teleport circle (≈ 10-engine ship's max straight move)
-    AFTERBURNER_RANGE_MULT: 1.5, // multiplier on normal forward reach for afterburner straight-line range
-    AFTERBURNER_HALF_WIDTH: 8,  // px half-width of damage streak (ship body width approximation)
+    AFTERBURNER_RANGE_MULT: 1.25,             // multiplier on normal move reach for afterburner range
+    AFTERBURNER_CONE_HALF_ANGLE: Math.PI / 4, // ±45° steering cone (90° total)
+    AFTERBURNER_HALF_WIDTH: 8,                // px half-width of damage streak
     // Tractor beam — forward-cone pull
     TRACTOR_BEAM_HALF_ANGLE: Math.PI / 6,   // ±30° forward cone (must be facing the target)
 
@@ -177,11 +182,16 @@ const CONSTANTS = {
     WARHEAD_KNOCKBACK:     50,  // max knockback distance in px (scales to 0 at edge)
 
     SPECIAL_MOVES: {
-        blink:       { id: 'blink',       name: 'Blink',       desc: 'Teleport up to 80px in any direction; randomizes facing.',                       actionCost: 1, cooldown: 2 },
-        afterburner: { id: 'afterburner', name: 'Afterburner', desc: 'Dash forward up to 1.5× normal range; damages enemies in path.',                 actionCost: 1, cooldown: 2 },
-        warhead:      { id: 'warhead',      name: 'Warhead',      desc: 'Fire a missile into the zone ahead; blast damages + knocks back nearby ships.',  actionCost: 1, cooldown: 3 },
-        tractor_beam: { id: 'tractor_beam', name: 'Tractor Beam', desc: 'Pull a ship in the forward cone toward you; both ships move closer.',             actionCost: 1, cooldown: 2 },
+        blink:       { id: 'blink',       name: 'Blink',       desc: 'Teleport up to 80px in any direction.',                                          actionCost: 1, cooldown: 2 },
+        afterburner: { id: 'afterburner', name: 'Afterburner', desc: 'Dash forward at full range; damages enemies in path.',                            actionCost: 1, cooldown: 2 },
+        warhead:      { id: 'warhead',      name: 'Warhead',      desc: 'Fire a missile into the zone ahead; blast damages + knocks back all ships in radius, including allies.',  actionCost: 1, cooldown: 3 },
+        tractor_beam: { id: 'tractor_beam', name: 'Tractor Beam', desc: 'Pull any ship toward you; allies can be targeted at any angle, enemies must be in the forward cone.',             actionCost: 1, cooldown: 2 },
+        emp_blast:    { id: 'emp_blast',    name: 'EMP Blast',    desc: 'Instantly damages shields and locks abilities on all ships nearby, including yourself.', actionCost: 1, cooldown: 4 },
+        cloak:        { id: 'cloak',        name: 'Cloak',        desc: 'Become untargetable by lasers and ramming for 2–4 rounds. Revealed by taking damage or using an ability.', actionCost: 1, cooldown: 5 },
     },
+
+    CLOAK_MIN_TURNS: 2,
+    CLOAK_MAX_TURNS: 4,
 
     // Asteroids
     ASTEROID_SPAWN_CHANCE: 0.5,
@@ -191,7 +201,7 @@ const CONSTANTS = {
     ASTEROID_MAX_RADIUS: 32,         // 8× SHIP_SIZE
     ASTEROID_MIN_SPLIT_RADIUS: 3,    // fragments smaller than this disappear instead of splitting
     ASTEROID_SPLIT_SPEED: 50,        // px/s for newly split fragments
-    ASTEROID_DRAG: 0.6,              // velocity multiplier per second (friction)
+    ASTEROID_DRAG: 0.002,            // velocity multiplier per second (friction) — ~0.5s stop time
     ASTEROID_COLLISION_DAMAGE: 1,    // hull damage: moving asteroid hit, or overlap collision
     ASTEROID_KNOCKBACK: 40,          // knockback px when a moving asteroid hits a ship
     ASTEROID_SHIP_RADIUS: 12,        // collision radius for ships in overlap checks (≈ SHIP_SIZE × 3)

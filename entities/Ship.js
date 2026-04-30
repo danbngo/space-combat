@@ -56,6 +56,10 @@ class Ship {
             });
         }
         
+        // Cloak state
+        this.cloaked = false;
+        this.cloakTurnsRemaining = 0;
+
         // Animations
         this.targetX = x;
         this.targetY = y;
@@ -64,8 +68,14 @@ class Ship {
         this.isShooting = false;
         this.shootingTarget = null;
     }
+
+    decloak() {
+        this.cloaked = false;
+        this.cloakTurnsRemaining = 0;
+    }
     
     takeDamage(damage) {
+        if (damage > 0) this.decloak();
         const absorbedByShields = Math.min(damage, this.shields);
         const remainingDamage = damage - absorbedByShields;
 

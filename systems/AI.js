@@ -1,17 +1,52 @@
 // AI System
 class AISystem {
-    // Move toward nearest arena edge — used when fleeing
+    // Move toward nearest arena edge — used when fleeing, constrained to movement oval
     static flee(aiShip, combat) {
         const ang = Math.atan2(aiShip.y - combat.centerY, aiShip.x - combat.centerX);
-        aiShip.targetX = combat.centerX + Math.cos(ang) * combat.arenaRadius * 1.5;
-        aiShip.targetY = combat.centerY + Math.sin(ang) * combat.arenaRadius * 1.5;
+        const farX = aiShip.x + Math.cos(ang) * aiShip.engine * 20;
+        const farY = aiShip.y + Math.sin(ang) * aiShip.engine * 20;
+        const dest = clampToMovementOval(aiShip, farX, farY);
+        const moveDist = distance(aiShip.x, aiShip.y, dest.x, dest.y);
+        aiShip.targetX = dest.x;
+        aiShip.targetY = dest.y;
         aiShip.targetRotation = ang;
         aiShip.isMoving = true;
-        console.log(`[AI ${aiShip.name}] FLEE toward arena edge ang=${(ang * 180 / Math.PI).toFixed(0)}°`);
+        console.log(`[AI ${aiShip.name}] FLEE toward arena edge ang=${(ang * 180 / Math.PI).toFixed(0)}° dist=${moveDist.toFixed(0)}`);
+    }
+
+    // Nudge a destination away from nearby asteroids and allied ships, then re-clamp to oval
+    static avoidObstacles(aiShip, desiredX, desiredY, combat) {
+        const AVOID_DIST = CONSTANTS.ASTEROID_SHIP_RADIUS * 4;
+        const PUSH = 30;
+        let pushX = 0, pushY = 0;
+
+        for (const asteroid of combat.asteroids) {
+            const d = distance(desiredX, desiredY, asteroid.x, asteroid.y);
+            const clearance = asteroid.radius + CONSTANTS.ASTEROID_SHIP_RADIUS + 8;
+            if (d < clearance + AVOID_DIST) {
+                const strength = (1 - d / (clearance + AVOID_DIST)) * PUSH;
+                const a = Math.atan2(desiredY - asteroid.y, desiredX - asteroid.x);
+                pushX += Math.cos(a) * strength;
+                pushY += Math.sin(a) * strength;
+            }
+        }
+
+        for (const ally of combat.enemyShips) {
+            if (!ally.alive || ally === aiShip) continue;
+            const d = distance(desiredX, desiredY, ally.x, ally.y);
+            if (d < CONSTANTS.ASTEROID_SHIP_RADIUS * 3.5) {
+                const strength = (1 - d / (CONSTANTS.ASTEROID_SHIP_RADIUS * 3.5)) * PUSH;
+                const a = Math.atan2(desiredY - ally.y, desiredX - ally.x);
+                pushX += Math.cos(a) * strength;
+                pushY += Math.sin(a) * strength;
+            }
+        }
+
+        return clampToMovementOval(aiShip, desiredX + pushX, desiredY + pushY);
     }
 
     static decideAction(aiShip, playerShips, combat) {
-        const alivePlayerShips = playerShips.filter(s => s.alive);
+        const alivePlayerShips = playerShips.filter(s => s.alive && !s.cloaked);
         if (alivePlayerShips.length === 0) return;
 
         const hullPct = aiShip.hull / aiShip.maxHull;
@@ -56,35 +91,38 @@ class AISystem {
         }
     }
 
-    // Always moves toward nearest target — only called when out of range
+    // Moves toward nearest target within the ship's movement oval
     static moveAction(aiShip, playerShips, combat) {
         let nearest = null;
         let nearestDist = Infinity;
 
         playerShips.forEach(ship => {
-            if (ship.alive) {
+            if (ship.alive && !ship.cloaked) {
                 const dist = distance(aiShip.x, aiShip.y, ship.x, ship.y);
-                if (dist < nearestDist) {
-                    nearestDist = dist;
-                    nearest = ship;
-                }
+                if (dist < nearestDist) { nearestDist = dist; nearest = ship; }
             }
         });
 
-        if (nearest) {
-            const angle = Math.atan2(nearest.y - aiShip.y, nearest.x - aiShip.x);
-            const moveDistance = aiShip.getMaxMoveDistance() * CONSTANTS.AI_MOVE_TOWARD_FACTOR;
-            aiShip.targetX = aiShip.x + Math.cos(angle) * moveDistance;
-            aiShip.targetY = aiShip.y + Math.sin(angle) * moveDistance;
-            aiShip.targetRotation = angle;
-            aiShip.isMoving = true;
-            console.log(`[AI ${aiShip.name}] MOVE toward ${nearest.name} dist=${nearestDist.toFixed(0)} moveDist=${moveDistance.toFixed(0)}`);
-        }
+        if (!nearest) return;
+
+        const angle = Math.atan2(nearest.y - aiShip.y, nearest.x - aiShip.x);
+        // Desired point far in direction of target — oval clamps it to reachable area
+        const farX = aiShip.x + Math.cos(angle) * aiShip.engine * 20;
+        const farY = aiShip.y + Math.sin(angle) * aiShip.engine * 20;
+        const clamped = clampToMovementOval(aiShip, farX, farY);
+        const dest = this.avoidObstacles(aiShip, clamped.x, clamped.y, combat);
+        const moveDist = distance(aiShip.x, aiShip.y, dest.x, dest.y);
+
+        aiShip.targetX = dest.x;
+        aiShip.targetY = dest.y;
+        aiShip.targetRotation = Math.atan2(dest.y - aiShip.y, dest.x - aiShip.x);
+        aiShip.isMoving = true;
+        console.log(`[AI ${aiShip.name}] MOVE toward ${nearest.name} dist=${nearestDist.toFixed(0)} moveDist=${moveDist.toFixed(0)}`);
     }
 
     static attackAction(aiShip, playerShips, combat) {
         const shootRange = aiShip.radar * CONSTANTS.SHOOT_RANGE_BASE;
-        const inRange = playerShips.filter(s => s.alive && distance(aiShip.x, aiShip.y, s.x, s.y) <= shootRange);
+        const inRange = playerShips.filter(s => s.alive && !s.cloaked && distance(aiShip.x, aiShip.y, s.x, s.y) <= shootRange);
 
         // Should not happen given decideAction, but guard anyway
         if (inRange.length === 0) {
@@ -144,36 +182,38 @@ class AISystem {
         const result = aiShip.shootAt(bestTarget, shootRange);
         console.log(`[AI ${aiShip.name}] FIRE at ${bestTarget.name} dist=${distance(aiShip.x, aiShip.y, bestTarget.x, bestTarget.y).toFixed(0)} hit=${result.hit} dmg=${result.damage}`);
 
-        // Pre-calculate damage split — don't apply yet so bars stay at old values until laser lands
-        let shieldAbsorb = 0, hullDmg = 0;
-        if (result.hit) {
-            shieldAbsorb = Math.min(result.damage, bestTarget.shields);
-            hullDmg = result.damage - shieldAbsorb;
-        }
+        const obstruction = combat.getPathObstructions(aiShip, bestTarget);
+        const laserEnd = obstruction ? obstruction.entity : bestTarget;
 
         combat.addFloatingText('Fire!', '#ff8800', aiShip.x, aiShip.y - 12);
-
-        // Laser for both hit and miss
         combat.addAnimation({
             type: 'laser',
             from: { x: aiShip.x, y: aiShip.y },
-            to: { x: bestTarget.x, y: bestTarget.y },
+            to:   { x: laserEnd.x, y: laserEnd.y },
             duration: CONSTANTS.COMBAT_ANIMATION_SPEED,
             totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED
         });
 
         const delay = CONSTANTS.COMBAT_ANIMATION_SPEED;
         const t = bestTarget;
-        if (result.hit) {
-            const sa = shieldAbsorb, hd = hullDmg;
+        if (obstruction) {
             setTimeout(() => {
-                t.takeDamage(result.damage); // apply after laser arrives
-                t.triggerHitFlash(hd, sa);
-                if (sa > 0) combat.addFloatingText(`-${sa}`, '#4488ff', t.x, t.y - 20);
-                if (hd > 0) combat.addFloatingText(`-${hd}`, '#ff4444', t.x, t.y - 6);
+                combat.addFloatingText('Missed!', '#555555', t.x, t.y - 6);
+                combat._applyLaserHitToObstruction(aiShip, obstruction, t);
+            }, delay);
+        } else if (result.hit) {
+            const shieldAbsorb = Math.min(result.damage, t.shields);
+            const hullDmg = result.damage - shieldAbsorb;
+            setTimeout(() => {
+                const wasCloak = t.cloaked;
+                t.takeDamage(result.damage);
+                if (wasCloak) combat.addFloatingText('Revealed!', '#88ffcc', t.x, t.y - 30);
+                t.triggerHitFlash(hullDmg, shieldAbsorb);
+                if (shieldAbsorb > 0) combat.addFloatingText(`-${shieldAbsorb}`, '#4488ff', t.x, t.y - 20);
+                if (hullDmg > 0)      combat.addFloatingText(`-${hullDmg}`,      '#ff4444', t.x, t.y - 6);
                 const parts = [];
-                if (sa > 0) parts.push(`${sa} shld`);
-                if (hd > 0) parts.push(`${hd} hull`);
+                if (shieldAbsorb > 0) parts.push(`${shieldAbsorb} shld`);
+                if (hullDmg > 0)      parts.push(`${hullDmg} hull`);
                 combat.addLog(`${combat._shipLabel(aiShip)} → ${combat._shipLabel(t)}: -${parts.join(' -')}`);
                 if (!t.alive) {
                     combat.addAnimation({ type: 'explosion', x: t.x, y: t.y, duration: CONSTANTS.EXPLOSION_DURATION });

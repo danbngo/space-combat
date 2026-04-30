@@ -191,10 +191,13 @@ class RenderingSystem {
         this.ctx.fill();
     }
 
-    // isActiveTurn = green ring, isSelected = cyan dashed ring, isHovered = highlight, isDimmed = faded, isWreck = destroyed
-    drawShip(ship, isActiveTurn = false, isSelected = false, isHovered = false, isDimmed = false, isWreck = false) {
+    // isActiveTurn = green ring, isSelected = cyan dashed ring, isHovered = highlight, isDimmed = faded, isWreck = destroyed, isCloaked = stealth, escapeAlpha = fade-out 0→1
+    drawShip(ship, isActiveTurn = false, isSelected = false, isHovered = false, isDimmed = false, isWreck = false, isCloaked = false, escapeAlpha = 1) {
+        if (isCloaked && !ship.isPlayer) return; // enemy cloaked ships are completely invisible
         this.ctx.save();
-        if (isWreck) this.ctx.globalAlpha = 0.15;
+        if (escapeAlpha < 1) this.ctx.globalAlpha = escapeAlpha;
+        else if (isCloaked) this.ctx.globalAlpha = 0.5; // player cloaked ships: 50% transparent
+        else if (isWreck) this.ctx.globalAlpha = 0.55;
         else if (isDimmed) this.ctx.globalAlpha = 0.25;
         const SIZE = CONSTANTS.SHIP_SIZE;
 
@@ -427,64 +430,92 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
-    // Forward-axis afterburner range: damage corridor + max-range endpoint marker
+    // 90° steering cone showing afterburner range
     drawAfterburnerRange(ship) {
-        const range = ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
-        const hw    = CONSTANTS.AFTERBURNER_HALF_WIDTH;
+        const range     = ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
+        const halfAngle = CONSTANTS.AFTERBURNER_CONE_HALF_ANGLE;
+
         this.ctx.save();
         this.ctx.translate(ship.x, ship.y);
         this.ctx.rotate(ship.rotation);
+        // +x is now forward; cone spans -halfAngle to +halfAngle
 
-        // Filled corridor
-        const grad = this.ctx.createLinearGradient(0, 0, range, 0);
-        grad.addColorStop(0,   'rgba(255, 140, 0, 0.10)');
-        grad.addColorStop(1,   'rgba(255, 140, 0, 0.03)');
+        // Filled cone sector
+        const grad = this.ctx.createRadialGradient(0, 0, 0, 0, 0, range);
+        grad.addColorStop(0, 'rgba(255,140,0,0.13)');
+        grad.addColorStop(1, 'rgba(255,140,0,0.03)');
         this.ctx.fillStyle = grad;
-        this.ctx.fillRect(0, -hw, range, hw * 2);
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, 0);
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
+        this.ctx.closePath();
+        this.ctx.fill();
 
-        // Dashed corridor border lines
-        this.ctx.strokeStyle = 'rgba(255, 160, 40, 0.55)';
-        this.ctx.lineWidth   = 0.8 / this.zoom;
+        // Cone edge lines (dashed)
+        this.ctx.strokeStyle = 'rgba(255,160,40,0.5)';
+        this.ctx.lineWidth = 0.8 / this.zoom;
         this.ctx.setLineDash([5 / this.zoom, 4 / this.zoom]);
         this.ctx.beginPath();
-        this.ctx.moveTo(0, -hw); this.ctx.lineTo(range, -hw);
-        this.ctx.moveTo(0,  hw); this.ctx.lineTo(range,  hw);
+        this.ctx.moveTo(0, 0); this.ctx.lineTo(range * Math.cos(-halfAngle), range * Math.sin(-halfAngle));
+        this.ctx.moveTo(0, 0); this.ctx.lineTo(range * Math.cos( halfAngle), range * Math.sin( halfAngle));
         this.ctx.stroke();
         this.ctx.setLineDash([]);
 
-        // Centre-line arrow
-        this.ctx.strokeStyle = 'rgba(255, 160, 40, 0.45)';
-        this.ctx.lineWidth = 1.5 / this.zoom;
+        // Arc at max range
+        this.ctx.strokeStyle = 'rgba(255,160,40,0.45)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
+        this.ctx.stroke();
+
+        // Forward center reference line (dashed, dim)
+        this.ctx.strokeStyle = 'rgba(255,160,40,0.25)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
         this.ctx.beginPath();
         this.ctx.moveTo(0, 0); this.ctx.lineTo(range, 0);
         this.ctx.stroke();
-
-        // Endpoint cap
-        this.ctx.strokeStyle = 'rgba(255, 180, 60, 0.8)';
-        this.ctx.lineWidth = 1.5 / this.zoom;
-        this.ctx.beginPath();
-        this.ctx.moveTo(range, -hw * 1.5); this.ctx.lineTo(range, hw * 1.5);
-        this.ctx.stroke();
+        this.ctx.setLineDash([]);
 
         this.ctx.restore();
     }
 
-    // Cursor snapped to ship's forward axis, clamped to afterburner range
+    // Mouse-tracked aim line + endpoint marker, clamped to the steering cone
     drawAfterburnerCursor(ship, wx, wy) {
-        const range  = ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
-        const fwdX   = Math.cos(ship.rotation);
-        const fwdY   = Math.sin(ship.rotation);
-        const dot    = (wx - ship.x) * fwdX + (wy - ship.y) * fwdY;
-        const t      = Math.max(0, Math.min(range, dot));
-        const cx     = ship.x + fwdX * t;
-        const cy     = ship.y + fwdY * t;
-        const inside = dot >= 0 && dot <= range;
+        const range     = ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
+        const halfAngle = CONSTANTS.AFTERBURNER_CONE_HALF_ANGLE;
 
+        const mouseAng = Math.atan2(wy - ship.y, wx - ship.x);
+        const relAng   = Math.max(-halfAngle, Math.min(halfAngle, normalizeAngle(mouseAng - ship.rotation)));
+        const aimAng   = ship.rotation + relAng;
+
+        const cx = ship.x + Math.cos(aimAng) * range;
+        const cy = ship.y + Math.sin(aimAng) * range;
+
+        // Aim line from ship to endpoint
         this.ctx.save();
-        this.ctx.fillStyle = inside ? 'rgba(255,160,40,0.95)' : 'rgba(255,160,40,0.4)';
+        this.ctx.strokeStyle = 'rgba(255,180,60,0.75)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
         this.ctx.beginPath();
-        this.ctx.arc(cx, cy, 4 / this.zoom, 0, Math.PI * 2);
-        this.ctx.fill();
+        this.ctx.moveTo(ship.x, ship.y);
+        this.ctx.lineTo(cx, cy);
+        this.ctx.stroke();
+
+        // Endpoint tick (perpendicular bar) + forward-pointing chevron
+        const hw = CONSTANTS.AFTERBURNER_HALF_WIDTH * 1.5;
+        const px = -Math.sin(aimAng), py = Math.cos(aimAng); // perpendicular
+        const fx =  Math.cos(aimAng), fy = Math.sin(aimAng); // forward
+        this.ctx.strokeStyle = 'rgba(255,200,60,0.95)';
+        this.ctx.lineWidth = 2 / this.zoom;
+        this.ctx.beginPath();
+        // Perpendicular tick
+        this.ctx.moveTo(cx - px * hw,       cy - py * hw);
+        this.ctx.lineTo(cx + px * hw,       cy + py * hw);
+        // Chevron pointing backward (V opening toward ship)
+        this.ctx.moveTo(cx - px * hw * 0.5 - fx * hw * 0.6, cy - py * hw * 0.5 - fy * hw * 0.6);
+        this.ctx.lineTo(cx,                                   cy);
+        this.ctx.lineTo(cx + px * hw * 0.5 - fx * hw * 0.6, cy + py * hw * 0.5 - fy * hw * 0.6);
+        this.ctx.stroke();
         this.ctx.restore();
     }
 
@@ -509,6 +540,21 @@ class RenderingSystem {
     }
 
     // Forward-cone tractor beam range indicator
+    drawEmpRange(ship) {
+        const radius = CONSTANTS.WARHEAD_BLAST_RADIUS;
+        this.ctx.save();
+        this.ctx.fillStyle   = 'rgba(255, 238, 0, 0.07)';
+        this.ctx.strokeStyle = 'rgba(255, 238, 0, 0.7)';
+        this.ctx.lineWidth   = 1.5 / this.zoom;
+        this.ctx.setLineDash([6 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.arc(ship.x, ship.y, radius, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
+    }
+
     drawTractorBeamRange(ship) {
         const range     = ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
         const halfAngle = CONSTANTS.TRACTOR_BEAM_HALF_ANGLE;
@@ -694,6 +740,45 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
+    drawEmpBlast(x, y, progress) {
+        const blastR = CONSTANTS.WARHEAD_BLAST_RADIUS;
+        const alpha  = Math.max(0, 1 - progress);
+
+        this.ctx.save();
+
+        // Expanding outer shockwave ring (cyan/electric)
+        const outerR = blastR * (0.2 + progress * 0.95);
+        this.ctx.globalAlpha = alpha * 0.9;
+        this.ctx.strokeStyle = '#00ddff';
+        this.ctx.lineWidth   = (4 * (1 - progress * 0.8)) / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.arc(x, y, Math.max(0.5, outerR), 0, Math.PI * 2);
+        this.ctx.stroke();
+
+        if (progress > 0.1) {
+            const innerR = blastR * (0.2 + (progress - 0.1) * 0.8);
+            this.ctx.globalAlpha = alpha * 0.6;
+            this.ctx.strokeStyle = '#88ffff';
+            this.ctx.lineWidth   = (2.5 * (1 - progress * 0.7)) / this.zoom;
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, Math.max(0.5, innerR), 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+
+        if (progress < 0.3) {
+            const flashT = 1 - progress / 0.3;
+            const flashR = blastR * 0.45 * flashT;
+            this.ctx.globalAlpha = flashT * 0.45;
+            this.ctx.fillStyle   = '#aaffff';
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, Math.max(0.5, flashR), 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
+        this.ctx.globalAlpha = 1;
+        this.ctx.restore();
+    }
+
     // Expanding ring used for blink departure / arrival flash
     drawBlinkRing(x, y, progress) {
         const maxR = 28;
@@ -789,21 +874,31 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
-    drawAsteroid(asteroid) {
+    drawAsteroid(asteroid, isDimmed = false, isHovered = false) {
         const verts = asteroid.vertices;
         if (!verts || verts.length < 3) return;
         this.ctx.save();
+        if (isDimmed) this.ctx.globalAlpha = 0.3;
         this.ctx.translate(asteroid.x, asteroid.y);
         this.ctx.rotate(asteroid.rotation);
+
+        if (isHovered) {
+            this.ctx.strokeStyle = 'rgba(255, 210, 80, 0.7)';
+            this.ctx.lineWidth = 1.5 / this.zoom;
+            this.ctx.beginPath();
+            this.ctx.arc(0, 0, asteroid.radius * 1.25, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+
         this.ctx.beginPath();
         this.ctx.moveTo(verts[0][0], verts[0][1]);
         for (let i = 1; i < verts.length; i++) {
             this.ctx.lineTo(verts[i][0], verts[i][1]);
         }
         this.ctx.closePath();
-        this.ctx.fillStyle = '#443322';
+        this.ctx.fillStyle = isHovered ? '#554433' : '#443322';
         this.ctx.fill();
-        this.ctx.strokeStyle = '#887755';
+        this.ctx.strokeStyle = isHovered ? '#bbaa77' : '#887755';
         this.ctx.lineWidth = 1.2 / this.zoom;
         this.ctx.stroke();
         this.ctx.restore();

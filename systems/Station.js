@@ -29,6 +29,7 @@ class StationSystem {
 
         gameState.credits -= cost;
         const newShip = new Ship(0, 0, true, 0, shipStats);
+        newShip._buyPrice = cost;
         gameState.playerShips.push(newShip);
         gameState.selectedShip = newShip;
         return true;
@@ -74,26 +75,24 @@ class StationSystem {
         gameState.credits -= newCost;
 
         const newShip = new Ship(0, 0, true, 0, newShipStats);
+        newShip._buyPrice = newCost;
         gameState.playerShips.push(newShip);
         gameState.selectedShip = newShip;
         return true;
     }
 
     static calculateShipSaleValue(ship) {
-        const baseValue = Math.floor(CONSTANTS.NEW_SHIP_BASE_COST * 0.5);
-        const hullBonus = Math.round((ship.hull / ship.maxHull) * 50);
-        const shieldBonus = Math.round((ship.shields / ship.maxShields) * 30);
-        const weaponBonus = ship.laserDamage * 2;
-        const engineBonus = ship.engine * 3;
-        return Math.max(10, baseValue + hullBonus + shieldBonus + weaponBonus + engineBonus);
+        const buyPrice = ship._buyPrice || CONSTANTS.NEW_SHIP_BASE_COST;
+        return Math.floor(buyPrice * 0.5);
     }
 
-    static installModule(gameState, ship, moduleDef) {
-        if (gameState.credits < moduleDef.cost) return false;
+    static installModule(gameState, ship, moduleDef, quality = 1.0, adjustedCost = null) {
+        const cost = adjustedCost !== null ? adjustedCost : moduleDef.cost;
+        if (gameState.credits < cost) return false;
         if (ship.modules.length >= ship.moduleSlots) return false;
-        if (ship.modules.includes(moduleDef.id)) return false;
-        gameState.credits -= moduleDef.cost;
-        ship.installModule(moduleDef);
+        if (ship.modules.some(m => m.id === moduleDef.id)) return false;
+        gameState.credits -= cost;
+        ship.installModule(moduleDef, quality);
         return true;
     }
 

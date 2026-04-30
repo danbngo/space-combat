@@ -3,6 +3,7 @@ class UISystem {
     static stationTab = 'orbit';
     static combatTab = 'actions';
     static currentStationOffer = null;
+    static currentModuleOffer = null;
     static selectedOfferIndex = 0;
 
     static showScreen(screenName) {
@@ -255,6 +256,7 @@ class UISystem {
     static setStationTab(tab, gameState) {
         this.stationTab = tab;
         this.currentStationOffer = null;
+        this.currentModuleOffer = null;
         this.selectedOfferIndex = 0;
         this.updateStationScreen(gameState);
     }
@@ -268,11 +270,23 @@ class UISystem {
 
         const currentShip = gameState.selectedShip || gameState.playerShips[0] || null;
         if (!this.currentStationOffer) {
-            this.currentStationOffer = Array.from({ length: CONSTANTS.STATION_OFFER_COUNT }, () => ({
-                stats: UISystem.generateNewShipStats(),
-                cost: CONSTANTS.NEW_SHIP_BASE_COST + randomInt(-50, 50)
-            }));
+            this.currentStationOffer = Array.from({ length: CONSTANTS.STATION_OFFER_COUNT }, () => {
+                const stats = UISystem.generateNewShipStats();
+                return { stats, cost: CONSTANTS.NEW_SHIP_BASE_COST + randomInt(-100, 100) };
+            });
             this.selectedOfferIndex = 0;
+        }
+
+        if (!this.currentModuleOffer) {
+            const count = randomInt(0, 3);
+            const available = CONSTANTS.MODULES.slice();
+            this.currentModuleOffer = [];
+            for (let i = 0; i < count && available.length > 0; i++) {
+                const idx = randomInt(0, available.length - 1);
+                const [mod] = available.splice(idx, 1);
+                const quality = Math.round(randomFloat(0.75, 1.25) * 100) / 100;
+                this.currentModuleOffer.push({ moduleDef: mod, quality, cost: Math.round(mod.cost * quality) });
+            }
         }
 
         const offer = this.currentStationOffer[this.selectedOfferIndex];
@@ -301,9 +315,9 @@ class UISystem {
         } else if (this.stationTab === 'dock') {
             const repairCost = currentShip ? CONSTANTS.REPAIR_COST : 0;
             const modList = currentShip && currentShip.modules.length > 0
-                ? currentShip.modules.map(id => {
-                    const m = CONSTANTS.MODULES.find(m => m.id === id);
-                    return m ? m.name : id;
+                ? currentShip.modules.map(mod => {
+                    const m = CONSTANTS.MODULES.find(m => m.id === mod.id);
+                    return m ? m.name : mod.id;
                   }).join(', ')
                 : 'None';
             const builtinList = currentShip && (currentShip.builtinModules || []).length > 0
@@ -347,27 +361,34 @@ class UISystem {
                 : '<span style="color:#555;">None</span>';
 
             const installedNames = currentShip && currentShip.modules.length > 0
-                ? currentShip.modules.map(id => {
-                    const m = CONSTANTS.MODULES.find(m => m.id === id);
-                    return m ? m.name : id;
+                ? currentShip.modules.map(mod => {
+                    const m = CONSTANTS.MODULES.find(m => m.id === mod.id);
+                    return m ? m.name : mod.id;
                   }).join(', ')
                 : 'None';
 
-            const moduleRows = currentShip ? CONSTANTS.MODULES.map(mod => {
+            const offers = this.currentModuleOffer || [];
+            const moduleRows = currentShip ? offers.map(offer => {
+                const mod = offer.moduleDef;
                 const isBuiltin  = builtinIds.includes(mod.id);
-                const installed  = currentShip.modules.includes(mod.id);
+                const installed  = currentShip.modules.some(m => m.id === mod.id);
                 const noSlots    = !isBuiltin && !installed && slotsFree <= 0;
-                const cantAfford = !isBuiltin && !installed && gameState.credits < mod.cost;
+                const cantAfford = !isBuiltin && !installed && gameState.credits < offer.cost;
                 const disabled   = isBuiltin || installed || noSlots || cantAfford;
-                const label      = isBuiltin ? 'Built-in' : (installed ? 'Installed' : (noSlots ? 'Full' : 'Install'));
-                const rowStyle   = isBuiltin ? 'color:#cc99ff;' : (installed ? 'color:#aaa;' : '');
-                return `<tr style="${rowStyle}">
-                    <td style="white-space:nowrap;">${mod.name}</td>
+                const label      = installed ? 'Installed' : (noSlots ? 'Full' : 'Install');
+                const qualColor  = offer.quality >= 1.1 ? '#00ff88' : offer.quality <= 0.9 ? '#ff8888' : '#ffdd44';
+                const qualLabel  = `<span style="color:${qualColor};font-size:0.8em;"> ×${offer.quality.toFixed(2)}</span>`;
+                return `<tr>
+                    <td style="white-space:nowrap;">${mod.name}${qualLabel}</td>
                     <td style="color:#aaa;font-size:0.9em;">${mod.desc}</td>
-                    <td style="text-align:right;white-space:nowrap;">${isBuiltin ? '—' : `${mod.cost} cr`}</td>
-                    <td><button class="btn-primary btn-sm" ${disabled ? 'disabled' : ''} data-module-id="${mod.id}">${label}</button></td>
+                    <td style="text-align:right;white-space:nowrap;">${offer.cost} cr</td>
+                    <td><button class="btn-primary btn-sm" ${disabled ? 'disabled' : ''} data-module-offer-index="${offers.indexOf(offer)}">${label}</button></td>
                 </tr>`;
-            }).join('') : '<tr><td colspan="4" style="color:#aaa;">No ship selected.</td></tr>';
+            }).join('') : '';
+
+            const noOffersMsg = currentShip && offers.length === 0
+                ? '<tr><td colspan="4" style="color:#555;font-style:italic;">No modules available at this station.</td></tr>'
+                : (!currentShip ? '<tr><td colspan="4" style="color:#aaa;">No ship selected.</td></tr>' : '');
 
             contentHtml = `
                 <div class="station-section">
@@ -378,7 +399,7 @@ class UISystem {
                     ` : '<p>No ship selected.</p>'}
                     <table class="ship-status-table" style="margin-top:0.5em;width:100%;">
                         <thead><tr><th>Module</th><th>Effect</th><th>Cost</th><th></th></tr></thead>
-                        <tbody>${moduleRows}</tbody>
+                        <tbody>${moduleRows}${noOffersMsg}</tbody>
                     </table>
                 </div>`;
         }
@@ -505,17 +526,20 @@ class UISystem {
             });
         });
 
-        document.querySelectorAll('[data-module-id]').forEach(btn => {
+        document.querySelectorAll('[data-module-offer-index]').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (!currentShip) return;
-                const modId = btn.dataset.moduleId;
-                const moduleDef = CONSTANTS.MODULES.find(m => m.id === modId);
-                if (!moduleDef) return;
+                const offerIdx = Number(btn.dataset.moduleOfferIndex);
+                const offer = this.currentModuleOffer ? this.currentModuleOffer[offerIdx] : null;
+                if (!offer) return;
+                const moduleDef = offer.moduleDef;
+                const quality   = offer.quality;
+                const cost      = offer.cost;
 
                 const e = moduleDef.effect;
                 const s = currentShip;
+                const amt = e.amount !== undefined ? Math.max(1, Math.round(e.amount * quality)) : 0;
 
-                // Compute before/after for each stat
                 const statRow = (label, before, after) => {
                     const changed = after !== undefined && String(after) !== String(before);
                     return `<div class="modal-stat-row">
@@ -524,31 +548,31 @@ class UISystem {
                     </div>`;
                 };
 
-                const hullAfter    = e.stat === 'maxHull'    ? `${s.hull + e.amount}/${s.maxHull + e.amount}` : undefined;
-                const shAfter      = e.stat === 'maxShields' ? `${s.shields + e.amount}/${s.maxShields + e.amount}` : undefined;
-                const engAfter     = e.stat === 'engine'     ? s.engine + e.amount : undefined;
-                const radAfter     = e.stat === 'radar'      ? s.radar + e.amount : undefined;
+                const hullAfter = e.stat === 'maxHull'    ? `${s.hull + amt}/${s.maxHull + amt}` : undefined;
+                const shAfter   = e.stat === 'maxShields' ? `${s.shields + amt}/${s.maxShields + amt}` : undefined;
+                const engAfter  = e.stat === 'engine'     ? s.engine + amt : undefined;
+                const radAfter  = e.stat === 'radar'      ? s.radar + amt : undefined;
 
+                const qualColor = quality >= 1.1 ? '#00ff88' : quality <= 0.9 ? '#ff8888' : '#ffdd44';
                 const extraHtml = `
                     <div class="modal-stat-block">
                         <div class="modal-stat-ship-label">${s.name} &nbsp;·&nbsp; ${s.shipType} &nbsp;·&nbsp; slot ${s.modules.length + 1}/${s.moduleSlots}</div>
-                        ${statRow('Hull',    `${s.hull}/${s.maxHull}`,                     hullAfter)}
-                        ${statRow('Shields', `${s.shields}/${s.maxShields}`,               shAfter)}
-                        ${statRow('Laser',   s.laserDamage,                                undefined)}
-                        ${statRow('Engine',  s.engine,                                     engAfter)}
-                        ${statRow('Radar',   s.radar,                                      radAfter)}
+                        <div style="font-size:0.82em;color:${qualColor};margin-bottom:0.3em;">Quality: ×${quality.toFixed(2)}</div>
+                        ${statRow('Hull',    `${s.hull}/${s.maxHull}`,       hullAfter)}
+                        ${statRow('Shields', `${s.shields}/${s.maxShields}`, shAfter)}
+                        ${statRow('Laser',   s.laserDamage,                  undefined)}
+                        ${statRow('Engine',  s.engine,                       engAfter)}
+                        ${statRow('Radar',   s.radar,                        radAfter)}
                     </div>`;
 
                 this.showConfirmModal({
                     title: 'Install Module',
-                    lines: [
-                        `<strong>${moduleDef.name}</strong> — ${moduleDef.desc}`,
-                    ],
+                    lines: [`<strong>${moduleDef.name}</strong> — ${moduleDef.desc}`],
                     extraHtml,
                     creditsBefore: gameState.credits,
-                    creditsAfter: gameState.credits - moduleDef.cost,
+                    creditsAfter: gameState.credits - cost,
                     onConfirm: () => {
-                        if (StationSystem.installModule(gameState, currentShip, moduleDef)) {
+                        if (StationSystem.installModule(gameState, currentShip, moduleDef, quality, cost)) {
                             this.updateStationScreen(gameState);
                         }
                     }
@@ -653,7 +677,7 @@ class UISystem {
 
                 const shootRange     = activeTurnShip.radar * CONSTANTS.SHOOT_RANGE_BASE;
                 const hasValidTargets = combat.enemyShips.some(s =>
-                    s.alive &&
+                    s.alive && !s.cloaked &&
                     distance(activeTurnShip.x, activeTurnShip.y, s.x, s.y) <= shootRange &&
                     isInFiringZone(activeTurnShip, s));
                 const rechargeLabel  = (activeTurnShip.maxShields > 0 && activeTurnShip.shields >= activeTurnShip.maxShields)
@@ -682,7 +706,7 @@ class UISystem {
                         <div class="combat-action-row">
                             <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
                         </div>
-                        <p style="color:#ff8800;font-size:0.8em;margin-top:0.5em;text-align:center;">Click along the orange corridor to afterburner-dash forward · damages enemies in path</p>`;
+                        <p style="color:#ff8800;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere to afterburner-dash forward at full range · damages enemies in path</p>`;
                 } else if (!isAnimating && mode === 'warhead') {
                     actionsHtml = `
                         <div class="combat-action-row">
@@ -695,6 +719,12 @@ class UISystem {
                             <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
                         </div>
                         <p style="color:#00eeff;font-size:0.8em;margin-top:0.5em;text-align:center;">Click a ship within the cyan cone to pull it — target moves to midpoint, you move halfway there</p>`;
+                } else if (!isAnimating && mode === 'emp_blast') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ffee44;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere to fire EMP — damages shields and locks abilities on all ships in the yellow radius</p>`;
                 } else {
                     const dis     = !hasActions || isAnimating ? 'disabled' : '';
                     const fireDis = !hasActions || !hasValidTargets || isAnimating ? 'disabled' : '';
@@ -784,8 +814,18 @@ class UISystem {
         document.querySelectorAll('.combat-special-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const moveId = btn.dataset.moveId;
-                combat.playerMode = moveId; // e.g. 'blink'
-                this.updateCombatScreen(gameState, combat);
+                const activeShip = combat.playerShips[combat.currentShipIndex];
+                if (moveId === 'emp_blast') {
+                    combat.playerMode = 'emp_blast';
+                    this.updateCombatScreen(gameState, combat);
+                } else if (moveId === 'cloak') {
+                    if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                        combat.playerCloak(activeShip);
+                    }
+                } else {
+                    combat.playerMode = moveId;
+                    this.updateCombatScreen(gameState, combat);
+                }
             });
         });
 

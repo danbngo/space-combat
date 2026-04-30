@@ -54,7 +54,9 @@ const GameController = {
 
         // Initialize player starting fleet
         for (let i = 0; i < CONSTANTS.PLAYER_STARTING_SHIPS; i++) {
-            gameState.playerShips.push(new Ship(0, 0, true));
+            const s = new Ship(0, 0, true);
+            s._buyPrice = CONSTANTS.NEW_SHIP_BASE_COST;
+            gameState.playerShips.push(s);
         }
         assignFleetNames(gameState.playerShips);
     },
@@ -153,9 +155,12 @@ const GameController = {
         
         // Game Over Screen
         document.getElementById('gameOverButton').addEventListener('click', () => {
-            gameState.state = GAME_STATE.GALAXY;
-            UISystem.showScreen('galaxyScreen');
-            UISystem.updateGalaxyScreen(gameState);
+            UISystem.stationTab = 'orbit';
+            UISystem.currentStationOffer = null;
+            UISystem.currentModuleOffer = null;
+            combat = null;
+            this.initializeGameState();
+            UISystem.showScreen('titleScreen');
         });
     },
     
@@ -170,6 +175,7 @@ const GameController = {
         gameState.selectedShip = gameState.selectedShip || gameState.playerShips[0] || null;
         UISystem.stationTab = 'orbit';
         UISystem.currentStationOffer = null;
+        UISystem.currentModuleOffer = null;
         StationSystem.visitStation(gameState);
         UISystem.showScreen('stationScreen');
         UISystem.updateStationScreen(gameState);
@@ -255,11 +261,20 @@ const GameController = {
 
             if (mode === 'fire') {
                 if (clickedAsteroid && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
-                    console.log('[click] → playerShootAtAsteroid');
-                    combat.playerShootAtAsteroid(activeShip, clickedAsteroid);
+                    const shootRange = combat.getShootRange(activeShip);
+                    const dist = distance(activeShip.x, activeShip.y, clickedAsteroid.x, clickedAsteroid.y);
+                    const inRange = dist <= shootRange;
+                    const inZone  = isInFiringZone(activeShip, clickedAsteroid);
+                    console.log(`[click] asteroid fire: dist=${dist.toFixed(0)} range=${shootRange.toFixed(0)} inRange=${inRange} inZone=${inZone}`);
+                    if (inRange && inZone) {
+                        console.log('[click] → playerShootAtAsteroid');
+                        combat.playerShootAtAsteroid(activeShip, clickedAsteroid);
+                    } else {
+                        console.log(`[click] asteroid fire BLOCKED: ${!inRange ? 'out of range' : 'not in firing zone'}`);
+                    }
                 } else {
                     if (clickedShip) combat.selectedCombatShip = clickedShip;
-                    if (clickedShip && !clickedShip.isPlayer && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    if (clickedShip && !clickedShip.isPlayer && !clickedShip.cloaked && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
                         const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
                         const shootRange = combat.getShootRange(activeShip);
                         const inRange = dist <= shootRange;
@@ -272,7 +287,7 @@ const GameController = {
                             console.log(`[click] fire BLOCKED: ${!inRange ? 'out of range' : 'not in firing zone'}`);
                         }
                     } else if (clickedShip) {
-                        console.log(`[click] fire skipped: isPlayer=${clickedShip.isPlayer} actions=${activeShip?.actionsRemaining} alive=${activeShip?.alive}`);
+                        console.log(`[click] fire skipped: isPlayer=${clickedShip.isPlayer} cloaked=${clickedShip.cloaked} actions=${activeShip?.actionsRemaining} alive=${activeShip?.alive}`);
                     }
                 }
             } else if (mode === 'move') {
@@ -287,7 +302,7 @@ const GameController = {
                     }
                 } else if (clickedShip) {
                     combat.selectedCombatShip = clickedShip;
-                    if (!clickedShip.isPlayer && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    if (!clickedShip.isPlayer && !clickedShip.cloaked && activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
                         const inOval = isWithinMovementOval(activeShip, clickedShip.x, clickedShip.y);
                         console.log(`[click] ram check: inOval=${inOval}`);
                         if (inOval) {
@@ -297,7 +312,7 @@ const GameController = {
                             console.log('[click] ram BLOCKED: target outside movement oval');
                         }
                     } else {
-                        console.log(`[click] ram skipped: isPlayer=${clickedShip.isPlayer} actions=${activeShip?.actionsRemaining}`);
+                        console.log(`[click] ram skipped: isPlayer=${clickedShip.isPlayer} cloaked=${clickedShip.cloaked} actions=${activeShip?.actionsRemaining}`);
                     }
                 } else if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
                     const target = clampToMovementOval(activeShip, wx, wy);
@@ -305,25 +320,23 @@ const GameController = {
                     combat.playerMoveToPoint(activeShip, target.x, target.y);
                 }
             } else if (mode === 'blink') {
-                const dist = distance(activeShip.x, activeShip.y, wx, wy);
-                const inRange = dist <= CONSTANTS.BLINK_RANGE;
-                console.log(`[click] blink check: dist=${dist.toFixed(0)} range=${CONSTANTS.BLINK_RANGE} inRange=${inRange}`);
-                if (inRange && activeShip.alive && activeShip.actionsRemaining > 0) {
-                    console.log('[click] → playerBlink');
-                    combat.playerBlink(activeShip, wx, wy);
-                } else {
-                    console.log('[click] blink BLOCKED: ' + (!inRange ? 'out of range' : 'no actions'));
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    const dist = distance(activeShip.x, activeShip.y, wx, wy);
+                    const tx = dist > CONSTANTS.BLINK_RANGE ? activeShip.x + (wx - activeShip.x) / dist * CONSTANTS.BLINK_RANGE : wx;
+                    const ty = dist > CONSTANTS.BLINK_RANGE ? activeShip.y + (wy - activeShip.y) / dist * CONSTANTS.BLINK_RANGE : wy;
+                    console.log(`[click] → playerBlink (clamped=${dist > CONSTANTS.BLINK_RANGE})`);
+                    combat.playerBlink(activeShip, tx, ty);
                 }
             } else if (mode === 'afterburner') {
                 if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
-                    const maxRange = activeShip.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
-                    const ang  = activeShip.rotation;
-                    const fwdX = Math.cos(ang), fwdY = Math.sin(ang);
-                    const dot  = (wx - activeShip.x) * fwdX + (wy - activeShip.y) * fwdY;
-                    const t    = Math.max(0, Math.min(maxRange, dot));
-                    const tx   = activeShip.x + fwdX * t;
-                    const ty   = activeShip.y + fwdY * t;
-                    console.log(`[click] → playerAfterburner forward t=${t.toFixed(0)} maxRange=${maxRange.toFixed(0)}`);
+                    const maxRange  = activeShip.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
+                    const halfAngle = CONSTANTS.AFTERBURNER_CONE_HALF_ANGLE;
+                    const mouseAng  = Math.atan2(wy - activeShip.y, wx - activeShip.x);
+                    const relAng    = Math.max(-halfAngle, Math.min(halfAngle, normalizeAngle(mouseAng - activeShip.rotation)));
+                    const aimAng    = activeShip.rotation + relAng;
+                    const tx = activeShip.x + Math.cos(aimAng) * maxRange;
+                    const ty = activeShip.y + Math.sin(aimAng) * maxRange;
+                    console.log(`[click] → playerAfterburner relAng=${(relAng * 180 / Math.PI).toFixed(0)}° range=${maxRange.toFixed(0)}`);
                     combat.playerAfterburner(activeShip, tx, ty);
                 }
             } else if (mode === 'warhead') {
@@ -343,12 +356,17 @@ const GameController = {
                     const tractorRange = combat.getTractorBeamRange(activeShip);
                     const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
                     const inRange = dist <= tractorRange;
-                    const inCone  = isInTractorBeamCone(activeShip, clickedShip);
+                    const inCone  = clickedShip.isPlayer || isInTractorBeamCone(activeShip, clickedShip);
                     console.log(`[click] tractor_beam: dist=${dist.toFixed(0)} range=${tractorRange.toFixed(0)} inRange=${inRange} inCone=${inCone}`);
                     if (inRange && inCone) {
                         console.log('[click] → playerTractorBeam');
                         combat.playerTractorBeam(activeShip, clickedShip);
                     }
+                }
+            } else if (mode === 'emp_blast') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    console.log('[click] → playerEmpBlast');
+                    combat.playerEmpBlast(activeShip);
                 }
             } else {
                 // Default: select only
@@ -377,9 +395,13 @@ const GameController = {
             combat.update(deltaTime);
 
             if (combat.state === COMBAT_STATE.ENDED) {
-                this.showCombatResultModal();
-                cancelAnimationFrame(animationFrameId);
-                return;
+                const elapsed = combat._endedAt ? Date.now() - combat._endedAt : 0;
+                if (elapsed >= 1500) {
+                    this.showCombatResultModal();
+                    cancelAnimationFrame(animationFrameId);
+                    return;
+                }
+                // Still in delay — keep rendering but don't show modal yet
             }
             
             animationFrameId = requestAnimationFrame(() => this.gameLoop());

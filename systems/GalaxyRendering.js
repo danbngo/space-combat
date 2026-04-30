@@ -464,13 +464,15 @@ class GalaxyRenderer {
         this.drawAllRouteFleetDots();
 
         // Draw all systems
+        const travelFromId = this._travelAnim ? this._travelAnim.from.id : null;
         systems.forEach(system => {
             const isReachable = currentSystem.connections && currentSystem.connections.includes(system.id);
             const isHovered = this.hoveredSystem && this.hoveredSystem.id === system.id;
             const isSelected = this.selectedSystem && this.selectedSystem.id === system.id;
             const isCurrent = system.id === currentSystem.id;
-            
-            this.drawSystem(system, isReachable, isHovered, isSelected, isCurrent);
+            const isTransitOrigin = travelFromId !== null && system.id === travelFromId;
+
+            this.drawSystem(system, isReachable, isHovered, isSelected, isCurrent, isTransitOrigin);
         });
         
         // Draw traveling ship on top of everything
@@ -559,6 +561,16 @@ class GalaxyRenderer {
                 this.ctx.stroke();
             }
             this.ctx.restore();
+
+            // Fleet size number above the dot
+            const fontSize = isHovered ? 11 : 9;
+            this.ctx.font = `bold ${fontSize}px Courier New`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'bottom';
+            this.ctx.fillStyle = isHovered ? '#ffcccc' : '#ff8888';
+            this.ctx.fillText(String(dot.size), dot.x, dot.y - S - 1);
+            this.ctx.textAlign = 'left';
+            this.ctx.textBaseline = 'alphabetic';
         }
     }
 
@@ -673,7 +685,7 @@ class GalaxyRenderer {
         this.ctx.stroke();
     }
     
-    drawSystem(system, isReachable, isHovered, isSelected, isCurrent) {
+    drawSystem(system, isReachable, isHovered, isSelected, isCurrent, isTransitOrigin = false) {
         const zoomedScaleX = this.scaleX * this.zoom;
         const zoomedScaleY = this.scaleY * this.zoom;
         const x = this.translateX + system.x * zoomedScaleX;
@@ -700,6 +712,8 @@ class GalaxyRenderer {
         let color;
         if (isHovered) {
             color = '#ffffff'; // White for hovered systems
+        } else if (isTransitOrigin) {
+            color = '#1a5c1a'; // Dark green — ship has departed, system no longer occupied
         } else if (isCurrent) {
             color = '#00ff00'; // Green for current
         } else if (isReachable) {

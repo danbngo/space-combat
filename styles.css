@@ -12,28 +12,27 @@ body {
 }
 
 /* Custom Headers */
-.header-1 {
+.header-1, .header-2, .header-3 {
     background-color: #ffffff;
     color: #000000;
     font-weight: bold;
-    padding: 0.5em;
-    margin-bottom: 1em;
+    padding: 0.5em 1em;
+    margin: 0 -1em 1em -1em;
 }
 
-.header-2 {
-    background-color: #ffffff;
-    color: #000000;
-    font-weight: bold;
-    padding: 0.5em;
-    margin-bottom: 1em;
+.header-1:first-child, .header-2:first-child, .header-3:first-child {
+    margin-top: -1em;
 }
 
-.header-3 {
-    background-color: #ffffff;
-    color: #000000;
-    font-weight: bold;
-    padding: 0.5em;
-    margin-bottom: 1em;
+/* Combat log panel has minimal padding — override bleed amounts */
+.combat-log-panel .header-3 {
+    margin-left: -0.25em;
+    margin-right: -0.25em;
+    padding-left: 0.25em;
+    padding-right: 0.25em;
+}
+.combat-log-panel .header-3:first-child {
+    margin-top: 0;
 }
 
 /* Screens */
