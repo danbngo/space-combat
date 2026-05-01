@@ -17,7 +17,8 @@ class Ship {
             this.shipType = stats.type || 'Unknown';
             this.name = stats.type || 'Unknown';
         } else {
-            const typeData = CONSTANTS.SHIP_TYPES[Math.floor(Math.random() * CONSTANTS.SHIP_TYPES.length)];
+            const availableTypes = CONSTANTS.SHIP_TYPES.filter(t => !t.internal);
+            const typeData = availableTypes[Math.floor(Math.random() * availableTypes.length)];
             this.shipType = typeData.type;
             this.name = typeData.type;
 
@@ -60,6 +61,11 @@ class Ship {
         this.cloaked = false;
         this.cloakTurnsRemaining = 0;
 
+        // Cloud status effects (set each frame by Combat.updateStatusFlags)
+        this.isDusty      = false;
+        this.isFrozen     = false;
+        this.isOverheated = false;
+
         // Animations
         this.targetX = x;
         this.targetY = y;
@@ -75,6 +81,7 @@ class Ship {
     }
     
     takeDamage(damage) {
+        if (this.isFrozen && damage > 0) damage = Math.ceil(damage * CONSTANTS.FROZEN_DAMAGE_MULT);
         if (damage > 0) this.decloak();
         const absorbedByShields = Math.min(damage, this.shields);
         const remainingDamage = damage - absorbedByShields;
@@ -190,7 +197,8 @@ class Ship {
 
     skipTurn() {
         this.actionsRemaining = Math.max(0, this.actionsRemaining - 1);
-        this.rechargeShields(Math.floor(this.engine / 2));
+        const base = Math.floor(this.engine / 2);
+        this.rechargeShields(this.isOverheated ? base * CONSTANTS.OVERHEATED_SHIELD_MULT : base);
     }
 
     clone() {

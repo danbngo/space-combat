@@ -67,6 +67,7 @@
                             <div id="dockTab" class="station-tab-button">Dock</div>
                             <div id="shipyardTab" class="station-tab-button">Shipyard</div>
                             <div id="modulesTab" class="station-tab-button">Modules</div>
+                            <div id="courthouseTab" class="station-tab-button">Courthouse</div>
                             <div id="leaveStationButton" class="btn-secondary">Leave Station</div>
                         </div>
                         <div id="stationTabContent" class="station-tab-content"></div>
@@ -176,10 +177,27 @@
     </div>
 
     <!-- Scripts -->
-    <script src="utils/Constants.js"></script>
+    <!-- Constants sub-files must load before constants/index.js assembles them -->
+    <script src="constants/Enums.js"></script>
+    <script src="constants/Core.js"></script>
+    <script src="constants/Galaxy.js"></script>
+    <script src="constants/Ships.js"></script>
+    <script src="constants/Combat.js"></script>
+    <script src="constants/Asteroids.js"></script>
+    <script src="constants/DustCloud.js"></script>
+    <script src="constants/Modules.js"></script>
+    <script src="constants/SpecialMoves.js"></script>
+    <script src="constants/Station.js"></script>
+    <script src="constants/AI.js"></script>
+    <script src="constants/index.js"></script>
+    <!-- Geometry primitives must load before any entity/system that uses them -->
+    <script src="geometry/Shapes.js"></script>
     <script src="utils/Helpers.js"></script>
     <script src="entities/Ship.js"></script>
     <script src="entities/Asteroid.js"></script>
+    <script src="entities/DustCloud.js"></script>
+    <script src="systems/SpriteSystem.js"></script>
+    <script src="systems/TooltipSystem.js"></script>
     <script src="systems/Rendering.js"></script>
     <script src="systems/GalaxyRendering.js"></script>
     <script src="systems/UI.js"></script>

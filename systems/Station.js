@@ -82,8 +82,7 @@ class StationSystem {
     }
 
     static calculateShipSaleValue(ship) {
-        const buyPrice = ship._buyPrice || CONSTANTS.NEW_SHIP_BASE_COST;
-        return Math.floor(buyPrice * 0.5);
+        return ship._buyPrice || CONSTANTS.NEW_SHIP_BASE_COST;
     }
 
     static installModule(gameState, ship, moduleDef, quality = 1.0, adjustedCost = null) {

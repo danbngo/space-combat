@@ -219,21 +219,49 @@ class RenderingSystem {
         const hullFlash   = hullFlashAge < 1000 && Math.floor(hullFlashAge / 125) % 2 === 0;
         const shieldFlash = now < (ship._shieldFlashUntil || 0);
 
-        let fillColor;
-        if (isWreck) {
-            fillColor = ship.isPlayer ? '#333333' : '#880000';
-        } else if (hullFlash) {
-            fillColor = '#880000';  // dark red, overrides everything
-        } else if (isHovered) {
-            fillColor = ship.isPlayer ? '#ffffff' : '#ffaaaa';
-        } else {
-            fillColor = ship.isPlayer ? '#aaaaaa' : '#ff3333';
-        }
-        this.ctx.fillStyle = fillColor;
-        drawShipShape(this.ctx, verts, SIZE);
-        this.ctx.fill();
+        // Try sprite first; fall back to vector polygon if no sprite loaded
+        const spriteId  = ship.shipType.toLowerCase().replace(/ /g, '_');
+        const spriteImg = spriteSystem.getImage(spriteId);
 
-        // Shield outline — skip for wreckage
+        if (spriteImg) {
+            // Scale sprite so its longest axis matches the ship's vertex bounding diameter
+            const worldDiam  = maxDist * SIZE * 2;
+            const spriteScale = worldDiam / Math.max(spriteImg.naturalWidth, spriteImg.naturalHeight);
+
+            // Tint: hull-flash overrides everything, otherwise team/role color
+            let tint, tintAlpha;
+            if (hullFlash) {
+                tint = '#880000'; tintAlpha = 0.75;
+            } else if (isWreck) {
+                tint = ship.isPlayer ? '#222233' : '#550000'; tintAlpha = 0.80;
+            } else if (isHovered) {
+                tint = '#ffffff'; tintAlpha = 0.30;
+            } else if (ship.isDrone) {
+                tint = ship.isPlayer ? '#ffaa33' : '#ff7700'; tintAlpha = 0.50;
+            } else {
+                tint = ship.isPlayer ? '#3399ff' : '#ff3333'; tintAlpha = 0.35;
+            }
+
+            // Draw at origin — ctx is already translated+rotated to ship space; alpha=1 inherits outer
+            spriteSystem.draw(this.ctx, spriteId, 0, 0, 0, spriteScale, { tint, tintAlpha });
+        } else {
+            // Vector fallback
+            let fillColor;
+            if (isWreck) {
+                fillColor = ship.isPlayer ? '#333333' : '#880000';
+            } else if (hullFlash) {
+                fillColor = '#880000';
+            } else if (isHovered) {
+                fillColor = ship.isPlayer ? '#ffffff' : '#ffaaaa';
+            } else {
+                fillColor = ship.isDrone ? (ship.isPlayer ? '#ffaa33' : '#ff7700') : (ship.isPlayer ? '#aaaaaa' : '#ff3333');
+            }
+            this.ctx.fillStyle = fillColor;
+            drawShipShape(this.ctx, verts, SIZE);
+            this.ctx.fill();
+        }
+
+        // Shield outline — skip for wreckage, works for both sprite and vector modes
         if (!isWreck && (ship.shields > 0 || shieldFlash)) {
             const alpha = shieldFlash ? 1 : 0.8;
             this.ctx.strokeStyle = shieldFlash ? `rgba(255,0,0,${alpha})` : `rgba(0,200,255,${alpha})`;
@@ -536,6 +564,36 @@ class RenderingSystem {
         grad.addColorStop(1,   `rgba(255, 230, 100, 0)`);
         this.ctx.fillStyle = grad;
         this.ctx.fillRect(0, -halfWidth, len, halfWidth * 2);
+        this.ctx.restore();
+    }
+
+    drawDroneBlastRange(ship) {
+        const radius = CONSTANTS.DRONE_BLAST_RADIUS;
+        this.ctx.save();
+        this.ctx.fillStyle   = 'rgba(255, 100, 0, 0.08)';
+        this.ctx.strokeStyle = 'rgba(255, 100, 0, 0.8)';
+        this.ctx.lineWidth   = 1.5 / this.zoom;
+        this.ctx.setLineDash([6 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.arc(ship.x, ship.y, radius, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
+    }
+
+    drawRepairBeamRange(ship) {
+        const range = ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 1.5;
+        this.ctx.save();
+        this.ctx.fillStyle   = 'rgba(0, 255, 100, 0.05)';
+        this.ctx.strokeStyle = 'rgba(0, 255, 100, 0.6)';
+        this.ctx.lineWidth   = 1.5 / this.zoom;
+        this.ctx.setLineDash([6 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.arc(ship.x, ship.y, range, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
         this.ctx.restore();
     }
 
@@ -901,6 +959,47 @@ class RenderingSystem {
         this.ctx.strokeStyle = isHovered ? '#bbaa77' : '#887755';
         this.ctx.lineWidth = 1.2 / this.zoom;
         this.ctx.stroke();
+        this.ctx.restore();
+    }
+
+    drawCloud(cloud) {
+        // Colour palette per cloud type
+        let stops;
+        if (cloud.type === 'ice') {
+            stops = [
+                [0,    'rgba(200, 240, 255, 0.28)'],
+                [0.45, 'rgba(160, 220, 255, 0.18)'],
+                [0.8,  'rgba(100, 190, 240, 0.07)'],
+                [1,    'rgba( 60, 160, 220, 0)'],
+            ];
+        } else if (cloud.type === 'plasma') {
+            stops = [
+                [0,    'rgba(255, 160,  60, 0.26)'],
+                [0.45, 'rgba(255, 100,  30, 0.16)'],
+                [0.8,  'rgba(200,  50,  10, 0.07)'],
+                [1,    'rgba(160,  20,   0, 0)'],
+            ];
+        } else { // dust
+            stops = [
+                [0,    'rgba(160, 200, 255, 0.22)'],
+                [0.45, 'rgba(120, 170, 240, 0.16)'],
+                [0.8,  'rgba( 80, 130, 200, 0.06)'],
+                [1,    'rgba( 60, 100, 180, 0)'],
+            ];
+        }
+
+        this.ctx.save();
+        this.ctx.translate(cloud.x, cloud.y);
+        this.ctx.rotate(cloud.angle);
+        this.ctx.scale(cloud.rx, cloud.ry);
+
+        const grad = this.ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+        stops.forEach(([offset, color]) => grad.addColorStop(offset, color));
+
+        this.ctx.fillStyle = grad;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, 1, 0, Math.PI * 2);
+        this.ctx.fill();
         this.ctx.restore();
     }
 

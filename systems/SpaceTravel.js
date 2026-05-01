@@ -495,11 +495,9 @@ class SpaceTravel {
                 const key = getRouteKey(sys.id, connId);
                 if (!seen.has(key)) {
                     seen.add(key);
-                    if (randomBool(CONSTANTS.ENEMY_FLEET_SPAWN_CHANCE)) {
-                        const strength = randomInt(1, 3);
-                        const size = Math.min(CONSTANTS.ENEMY_STARTING_SHIPS + strength - 1, CONSTANTS.MAX_ENEMY_FLEET_SIZE);
-                        const shipType = CONSTANTS.SHIP_TYPES[Math.floor(Math.random() * CONSTANTS.SHIP_TYPES.length)].type;
-                        fleets.set(key, { size, shipType });
+                    const count = randomInt(0, CONSTANTS.FLEET_MAX_PER_ROUTE);
+                    if (count > 0) {
+                        fleets.set(key, this.generateEncountersForRoute(count));
                     }
                 }
             });
@@ -508,12 +506,51 @@ class SpaceTravel {
         return fleets;
     }
 
-    static generateEnemyFleet(size) {
+    // Returns an array of encounter objects spread along a route.
+    static generateEncountersForRoute(count) {
+        const factionIds = CONSTANTS.FACTIONS.map(f => f.id);
+        const span = 0.70; // occupies [0.15, 0.85] of the route
+        const step = span / count;
+        const encounters = [];
+        for (let i = 0; i < count; i++) {
+            const basePos = 0.15 + step * i + step * 0.1 + Math.random() * step * 0.8;
+            encounters.push({
+                position: Math.min(0.85, Math.max(0.15, basePos)),
+                faction: factionIds[Math.floor(Math.random() * factionIds.length)],
+                size: randomInt(CONSTANTS.FLEET_SIZE_MIN, CONSTANTS.FLEET_SIZE_MAX),
+            });
+        }
+        return encounters;
+    }
+
+    // Generate enemy fleet ships for a given encounter object { faction, size }.
+    static generateEnemyFleet(encounter) {
+        const faction = encounter && encounter.faction ? encounter.faction : null;
+        const size    = encounter && encounter.size    ? encounter.size    : (encounter || 1);
+        const factionData = faction ? CONSTANTS.FACTIONS.find(f => f.id === faction) : null;
+        const shipTypes   = factionData ? factionData.shipTypes : null;
         const fleet = [];
         for (let i = 0; i < size; i++) {
-            fleet.push(new Ship(0, 0, false));
+            fleet.push(shipTypes && shipTypes.length
+                ? SpaceTravel.generateShipOfType(shipTypes[Math.floor(Math.random() * shipTypes.length)])
+                : new Ship(0, 0, false));
         }
         assignFleetNames(fleet);
         return fleet;
+    }
+
+    // Instantiate a Ship of a specific type with randomised stats.
+    static generateShipOfType(typeName) {
+        const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === typeName);
+        if (!typeData) return new Ship(0, 0, false);
+        const stats = {
+            type:    typeName,
+            hull:    Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.HULL_MIN,    CONSTANTS.SHIP_STATS.HULL_MAX)    * typeData.hullMult)),
+            shields: Math.max(0, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.SHIELDS_MIN, CONSTANTS.SHIP_STATS.SHIELDS_MAX) * typeData.shieldMult)),
+            laser:   Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.LASER_MIN,   CONSTANTS.SHIP_STATS.LASER_MAX)   * typeData.laserMult)),
+            radar:   Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.RADAR_MIN,   CONSTANTS.SHIP_STATS.RADAR_MAX)   * typeData.radarMult)),
+            engine:  Math.max(5, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.ENGINE_MIN,  CONSTANTS.SHIP_STATS.ENGINE_MAX)  * typeData.engineMult)),
+        };
+        return new Ship(0, 0, false, 0, stats);
     }
 }

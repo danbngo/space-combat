@@ -211,60 +211,35 @@ class GalaxyRenderer {
         }
 
         // Fleet dot hover (only when no system is hovered)
-        const oldFleet = this.hoveredRouteFleet;
+        const oldFleetId = this.hoveredRouteFleet ? this.hoveredRouteFleet.dotId : null;
         this.hoveredRouteFleet = this.hoveredSystem ? null : this.getRouteFleetAtPosition(this.mouseX, this.mouseY);
-        if (this.hoveredRouteFleet !== oldFleet) {
+        const newFleetId = this.hoveredRouteFleet ? this.hoveredRouteFleet.dotId : null;
+        if (newFleetId !== oldFleetId) {
             if (typeof gameState !== 'undefined') {
                 this.render(gameState.systems, gameState.currentSystem);
             }
         }
     }
     
-    animateTravel(fromSystem, toSystem, onMidpoint, onComplete) {
-        this._travelAnim = { from: fromSystem, to: toSystem, progress: 0, onComplete };
-
-        const runSegment = (startPct, endPct, onDone) => {
-            const segDur = (endPct - startPct) * CONSTANTS.GALAXY_TRAVEL_ANIM_DURATION;
-            const start = performance.now();
-            const tick = (now) => {
-                if (!this._travelAnim) return;
-                const t = Math.min(1, (now - start) / segDur);
-                this._travelAnim.progress = startPct + (endPct - startPct) * t;
-                this.render(gameState.systems, fromSystem);
-                if (t < 1) requestAnimationFrame(tick);
-                else onDone();
-            };
-            requestAnimationFrame(tick);
-        };
-
-        if (onMidpoint) {
-            runSegment(0, 0.5, () => { if (this._travelAnim) onMidpoint(); });
-        } else {
-            runSegment(0, 1, () => {
-                const cb = this._travelAnim && this._travelAnim.onComplete;
-                this._travelAnim = null;
-                if (cb) cb();
-            });
-        }
+    // Start a travel animation from fromSystem to toSystem. Does not start moving yet.
+    startTravelAnim(fromSystem, toSystem) {
+        this._travelAnim = { from: fromSystem, to: toSystem, progress: 0 };
     }
 
-    resumeTravel() {
-        if (!this._travelAnim) return;
-        const fromSystem = this._travelAnim.from;
-        const segDur = CONSTANTS.GALAXY_TRAVEL_ANIM_DURATION / 2;
+    // Animate from current progress to endPct then call onDone.
+    animateTravelSegment(endPct, onDone) {
+        if (!this._travelAnim) { onDone(); return; }
+        const startPct = this._travelAnim.progress;
+        if (startPct >= endPct) { onDone(); return; }
+        const segDur = Math.max(80, (endPct - startPct) * CONSTANTS.GALAXY_TRAVEL_ANIM_DURATION);
         const start = performance.now();
         const tick = (now) => {
             if (!this._travelAnim) return;
             const t = Math.min(1, (now - start) / segDur);
-            this._travelAnim.progress = 0.5 + 0.5 * t;
-            this.render(gameState.systems, fromSystem);
-            if (t < 1) {
-                requestAnimationFrame(tick);
-            } else {
-                const cb = this._travelAnim.onComplete;
-                this._travelAnim = null;
-                if (cb) cb();
-            }
+            this._travelAnim.progress = startPct + (endPct - startPct) * t;
+            this.render(gameState.systems, this._travelAnim.from);
+            if (t < 1) requestAnimationFrame(tick);
+            else onDone();
         };
         requestAnimationFrame(tick);
     }
@@ -520,15 +495,25 @@ class GalaxyRenderer {
                                 if (typeof gameState !== 'undefined' && gameState.routeFleets && gameState.routeFleets.has(pairKey)) {
                                     const zx = this.scaleX * this.zoom;
                                     const zy = this.scaleY * this.zoom;
-                                    const fleetData = gameState.routeFleets.get(pairKey);
-                                    this.routeFleetDots.push({
-                                        key: pairKey,
-                                        x: this.translateX + (system.x + otherSystem.x) / 2 * zx,
-                                        y: this.translateY + (system.y + otherSystem.y) / 2 * zy,
-                                        size: fleetData.size,
-                                        shipType: fleetData.shipType,
-                                        angle: Math.atan2(otherSystem.y - system.y, otherSystem.x - system.x)
-                                    });
+                                    const routeAngle = Math.atan2(otherSystem.y - system.y, otherSystem.x - system.x);
+                                    const encounters = gameState.routeFleets.get(pairKey);
+                                    for (const enc of encounters) {
+                                        const t = enc.position;
+                                        const ex = system.x + (otherSystem.x - system.x) * t;
+                                        const ey = system.y + (otherSystem.y - system.y) * t;
+                                        const factionData = CONSTANTS.FACTIONS.find(f => f.id === enc.faction);
+                                        this.routeFleetDots.push({
+                                            dotId: `${pairKey}|${enc.faction}|${t.toFixed(4)}`,
+                                            key: pairKey,
+                                            faction: enc.faction,
+                                            factionName: factionData ? factionData.name : 'Unknown',
+                                            color: factionData ? factionData.color : '#ff4444',
+                                            x: this.translateX + ex * zx,
+                                            y: this.translateY + ey * zy,
+                                            size: enc.size,
+                                            angle: routeAngle,
+                                        });
+                                    }
                                 }
                             } else if (system.seen || otherSystem.seen) {
                                 this.drawConnectionLine(system, otherSystem, '#2a2a3a');
@@ -543,20 +528,22 @@ class GalaxyRenderer {
     }
 
     drawAllRouteFleetDots() {
-        const fallbackVerts = [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
+        const fallbackVerts = [[2.3, 0], [0.3, -1.0], [-1.8, -1.5], [-1.3, 0], [-1.8, 1.5], [0.3, 1.0]]; // Raider shape default
         for (const dot of this.routeFleetDots) {
-            const isHovered = this.hoveredRouteFleet && this.hoveredRouteFleet.key === dot.key;
+            const isHovered = this.hoveredRouteFleet && this.hoveredRouteFleet.dotId === dot.dotId;
             const S = isHovered ? 10 : 7;
-            const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === dot.shipType);
-            const verts = typeData ? typeData.vertices : fallbackVerts;
+            const baseColor  = dot.color || '#ff4444';
+            const fillColor  = isHovered ? '#ffffff' : baseColor;
+            const labelColor = isHovered ? '#ffffff' : baseColor;
+
             this.ctx.save();
             this.ctx.translate(dot.x, dot.y);
             this.ctx.rotate(dot.angle);
-            this.ctx.fillStyle = isHovered ? '#ff9999' : '#ff4444';
-            drawShipShape(this.ctx, verts, S);
+            this.ctx.fillStyle = fillColor;
+            drawShipShape(this.ctx, fallbackVerts, S);
             this.ctx.fill();
             if (isHovered) {
-                this.ctx.strokeStyle = '#ffaaaa';
+                this.ctx.strokeStyle = '#ffffff';
                 this.ctx.lineWidth = 1.5;
                 this.ctx.stroke();
             }
@@ -567,7 +554,7 @@ class GalaxyRenderer {
             this.ctx.font = `bold ${fontSize}px Courier New`;
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'bottom';
-            this.ctx.fillStyle = isHovered ? '#ffcccc' : '#ff8888';
+            this.ctx.fillStyle = labelColor;
             this.ctx.fillText(String(dot.size), dot.x, dot.y - S - 1);
             this.ctx.textAlign = 'left';
             this.ctx.textBaseline = 'alphabetic';
@@ -575,7 +562,7 @@ class GalaxyRenderer {
     }
 
     getRouteFleetAtPosition(screenX, screenY) {
-        const HIT_RADIUS = 10;
+        const HIT_RADIUS = 12;
         for (const dot of this.routeFleetDots) {
             const dx = screenX - dot.x;
             const dy = screenY - dot.y;
@@ -587,7 +574,7 @@ class GalaxyRenderer {
     updateRouteFleetTooltip(fleet) {
         const tooltip = document.getElementById('systemTooltip');
         if (!tooltip) return;
-        tooltip.innerHTML = `<strong>Enemy Fleet</strong><br>Ships: ${fleet.size}`;
+        tooltip.innerHTML = `<strong>${fleet.factionName} Fleet</strong><br>Ships: ${fleet.size}`;
         tooltip.style.left = (this.mouseX + 10) + 'px';
         tooltip.style.top  = (this.mouseY + 10) + 'px';
         tooltip.style.display = 'block';
@@ -771,7 +758,16 @@ class GalaxyRenderer {
         const isConnected = currentSystem.connections && currentSystem.connections.includes(system.id);
         if (isConnected && typeof gameState !== 'undefined' && gameState.routeFleets) {
             const routeKey = getRouteKey(currentSystem.id, system.id);
-            html += `<br>Enemy Patrol: ${gameState.routeFleets.has(routeKey) ? 'Yes' : 'No'}`;
+            const encounters = gameState.routeFleets.get(routeKey);
+            if (encounters && encounters.length > 0) {
+                const summary = encounters.map(e => {
+                    const f = CONSTANTS.FACTIONS.find(f => f.id === e.faction);
+                    return `<span style="color:${f ? f.color : '#fff'}">${f ? f.name : '?'}(${e.size})</span>`;
+                }).join(' ');
+                html += `<br>Patrols: ${summary}`;
+            } else {
+                html += `<br>Patrols: None`;
+            }
         }
 
         if (!reachable) {

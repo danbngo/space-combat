@@ -41,6 +41,18 @@ class UISystem {
                 <span class="stat-bar-label" style="color:${color};">${current}/${max}</span>`;
     }
 
+    // Returns an HTML string of status-effect badges for a ship.
+    static renderStatusEffects(ship) {
+        const badges = [];
+        if (ship.isDusty)      badges.push('<span class="status-badge status-dusty">Dusty</span>');
+        if (ship.isFrozen)     badges.push('<span class="status-badge status-frozen">Frozen</span>');
+        if (ship.isOverheated) badges.push('<span class="status-badge status-overheated">Overheated</span>');
+        if (ship.cloaked)      badges.push('<span class="status-badge status-cloaked">Cloaked</span>');
+        if (ship.isDrone)      badges.push(`<span class="status-badge status-drone">Drone (${ship.droneLifetime ?? '?'}t)</span>`);
+        if (!badges.length) return '';
+        return `<div class="status-effects-row">${badges.join('')}</div>`;
+    }
+
     // Returns HTML for a full ship table.
     // options.selectable   — adds data-ship-index to rows and hover/click cursor
     // options.showStats    — adds Laser / Engine / Radar columns
@@ -61,11 +73,13 @@ class UISystem {
             const isFled = ship.fled && ship.alive;
 
             const nameLabel = ship.name || String(i + 1);
+            const typeDesc = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType)?.description || '';
+            const tipAttr  = typeDesc ? ` data-tooltip="${typeDesc}"` : '';
             const numCell = isDead
-                ? `<span style="color:#ff3333;">${nameLabel}</span>`
+                ? `<span style="color:#ff3333;"${tipAttr}>${nameLabel}</span>`
                 : isFled
-                ? `<span style="color:#ffaa44;">${nameLabel} (fled)</span>`
-                : nameLabel;
+                ? `<span style="color:#ffaa44;"${tipAttr}>${nameLabel} (fled)</span>`
+                : tipAttr ? `<span style="cursor:help;"${tipAttr}>${nameLabel}</span>` : nameLabel;
 
             const hullCell = bars
                 ? this.renderStatBar(ship.hull, ship.maxHull, hullColor)
@@ -98,29 +112,40 @@ class UISystem {
         </table>`;
     }
 
-    static renderOfferTable(offers, selectedIdx) {
+    static renderOfferTable(offers, selectedIdx, tradeInValue = 0) {
         const rows = offers.map((offer, i) => {
             const classes = ['ship-table-row', i === selectedIdx ? 'selected' : ''].filter(Boolean).join(' ');
             const typeLabel = offer.stats.type || String(i + 1);
+            const typeDesc  = CONSTANTS.SHIP_TYPES.find(t => t.type === offer.stats.type)?.description || '';
+            const tipAttr   = typeDesc ? ` data-tooltip="${typeDesc}"` : '';
+            const net = offer.cost - tradeInValue;
+            const netColor = net <= 0 ? '#00ff88' : '#ffdd44';
+            const netLabel = net <= 0 ? `+${-net}` : `${net}`;
             return `<tr class="${classes}" data-offer-index="${i}">
-                <td class="ship-num-cell" style="white-space:nowrap;">${typeLabel}</td>
+                <td class="ship-num-cell" style="white-space:nowrap;"><span style="cursor:help;"${tipAttr}>${typeLabel}</span></td>
                 <td style="text-align:center;">${offer.stats.hull}</td>
                 <td style="text-align:center;">${offer.stats.shields}</td>
                 <td style="text-align:center;">${offer.stats.laser}</td>
                 <td style="text-align:center;">${offer.stats.engine}</td>
                 <td style="text-align:center;">${offer.stats.radar}</td>
                 <td style="text-align:center;">${offer.cost}</td>
+                <td style="text-align:center;color:${netColor};">${netLabel}</td>
             </tr>`;
         }).join('');
         return `<table class="ship-status-table">
-            <thead><tr><th>Ship</th><th>Hull</th><th>Shield</th><th>LZR</th><th>ENG</th><th>RDR</th><th>Cost</th></tr></thead>
+            <thead><tr><th>Ship</th><th>Hull</th><th>Shield</th><th>LZR</th><th>ENG</th><th>RDR</th><th>Cost</th><th>Net</th></tr></thead>
             <tbody>${rows}</tbody>
         </table>`;
     }
 
     static renderPlayerStatusHtml(gameState, tableOptions = {}) {
+        const bounty = gameState.bounty || 0;
+        const bountyHtml = bounty > 0
+            ? `<p style="color:#ff4444;font-weight:bold;">Bounty: ${bounty} cr</p>`
+            : '';
         return `<div class="header-3">Player Status</div>
                 <p>Credits: ${gameState.credits}</p>
+                ${bountyHtml}
                 ${this.renderShipTable(gameState.playerShips, tableOptions)}`;
     }
 
@@ -143,8 +168,11 @@ class UISystem {
         }
 
         const isTransiting = typeof galaxyRenderer !== 'undefined' && galaxyRenderer && !!galaxyRenderer._travelAnim;
-        const actionsHtml = `<button id="showSystemButton" class="btn-primary" ${isTransiting ? 'disabled title="Cannot visit station while in transit"' : ''}>Show System</button>`;
-        currentActions.innerHTML = actionsHtml;
+        if (isTransiting) {
+            currentActions.innerHTML = '';
+            return;
+        }
+        currentActions.innerHTML = `<button id="showSystemButton" class="btn-primary">Show System</button>`;
         this.setupCurrentSystemButtons(gameState);
     }
 
@@ -170,6 +198,7 @@ class UISystem {
         }
 
         section.style.display = '';
+        const isTransiting = typeof galaxyRenderer !== 'undefined' && galaxyRenderer && !!galaxyRenderer._travelAnim;
         const isDirectRoute = gameState.currentSystem.connections &&
                               gameState.currentSystem.connections.includes(sys.id);
 
@@ -177,10 +206,10 @@ class UISystem {
             document.getElementById('selectedSystemName').textContent = 'Unknown System';
             document.getElementById('selectedSystemStatus').textContent = 'Status: Unexplored';
             const actions = document.getElementById('selectedSystemActions');
-            actions.innerHTML = isDirectRoute
+            actions.innerHTML = (!isTransiting && isDirectRoute)
                 ? `<button id="travelButton" class="btn-primary">Travel</button>`
                 : '';
-            if (isDirectRoute) {
+            if (!isTransiting && isDirectRoute) {
                 document.getElementById('travelButton').onclick = () => GameController.travelToSystem(sys);
             }
             return;
@@ -191,11 +220,11 @@ class UISystem {
 
         const actions = document.getElementById('selectedSystemActions');
         actions.innerHTML = `
-            ${isDirectRoute ? `<button id="travelButton" class="btn-primary">Travel</button>` : ''}
+            ${(!isTransiting && isDirectRoute) ? `<button id="travelButton" class="btn-primary">Travel</button>` : ''}
             <button id="viewSystemLogButton" class="btn-secondary">View Records</button>
         `;
 
-        if (isDirectRoute) {
+        if (!isTransiting && isDirectRoute) {
             document.getElementById('travelButton').onclick = () => GameController.travelToSystem(sys);
         }
         document.getElementById('viewSystemLogButton').onclick = () => this.showSystemLog(gameState);
@@ -216,8 +245,15 @@ class UISystem {
                 const connected = gameState.systems.find(s => s.id === id);
                 if (!connected) return null;
                 const routeKey = getRouteKey(sys.id, id);
-                const hasPatrol = gameState.routeFleets && gameState.routeFleets.has(routeKey);
-                return connected.name + (hasPatrol ? ' [PATROL]' : '');
+                const encounters = gameState.routeFleets && gameState.routeFleets.get(routeKey);
+                if (encounters && encounters.length > 0) {
+                    const summary = encounters.map(e => {
+                        const f = CONSTANTS.FACTIONS.find(f => f.id === e.faction);
+                        return `${f ? f.name : '?'}(${e.size})`;
+                    }).join(', ');
+                    return `${connected.name} [${summary}]`;
+                }
+                return connected.name;
             }).filter(Boolean).join(', ') || 'None';
             content.innerHTML = `
                 <div class="station-section">
@@ -247,6 +283,7 @@ class UISystem {
     static openStationTab(tab, gameState) {
         gameState.state = GAME_STATE.STATION;
         gameState.selectedShip = gameState.selectedShip || gameState.playerShips[0] || null;
+        this.currentModuleOffer = null;
         this.setStationTab(tab, gameState);
         StationSystem.visitStation(gameState);
         this.showScreen('stationScreen');
@@ -256,7 +293,6 @@ class UISystem {
     static setStationTab(tab, gameState) {
         this.stationTab = tab;
         this.currentStationOffer = null;
-        this.currentModuleOffer = null;
         this.selectedOfferIndex = 0;
         this.updateStationScreen(gameState);
     }
@@ -279,7 +315,7 @@ class UISystem {
 
         if (!this.currentModuleOffer) {
             const count = randomInt(0, 3);
-            const available = CONSTANTS.MODULES.slice();
+            const available = CONSTANTS.MODULES.filter(m => !m.internal);
             this.currentModuleOffer = [];
             for (let i = 0; i < count && available.length > 0; i++) {
                 const idx = randomInt(0, available.length - 1);
@@ -342,12 +378,12 @@ class UISystem {
         } else if (this.stationTab === 'shipyard') {
             contentHtml = `
                 <div class="station-section">
-                    ${this.renderOfferTable(this.currentStationOffer, this.selectedOfferIndex)}
+                    ${this.renderOfferTable(this.currentStationOffer, this.selectedOfferIndex, currentShip ? shipSaleValue : 0)}
                     <div class="station-action-row" style="margin-top:0.5em;">
                         <button id="buyButton" class="btn-primary">Buy</button>
                         <button id="tradeButton" class="btn-primary">Trade In</button>
                     </div>
-                    ${offer ? `<p class="station-note">Cost: ${offer.cost} cr. Trade-in: ${shipSaleValue} cr. Net: ${tradePrice} cr.</p>` : ''}
+                    ${offer && currentShip ? `<p class="station-note">Selected ship trade value: ${shipSaleValue} cr.</p>` : ''}
                 </div>`;
         } else if (this.stationTab === 'modules') {
             const slotsFree = currentShip ? currentShip.moduleSlots - currentShip.modules.length : 0;
@@ -401,6 +437,23 @@ class UISystem {
                         <thead><tr><th>Module</th><th>Effect</th><th>Cost</th><th></th></tr></thead>
                         <tbody>${moduleRows}${noOffersMsg}</tbody>
                     </table>
+                </div>`;
+        }
+
+        if (this.stationTab === 'courthouse') {
+            const bounty = gameState.bounty || 0;
+            const canPay = bounty > 0 && gameState.credits >= bounty;
+            contentHtml = `
+                <div class="station-section">
+                    <p>Current Bounty: <span style="color:${bounty > 0 ? '#ff4444' : '#00ff88'};font-weight:bold;">${bounty} credits</span></p>
+                    ${bounty > 0
+                        ? `<p style="color:#aaa;font-size:0.9em;">Paying your bounty clears your criminal record. Cost: ${bounty} credits.</p>
+                           <div class="station-action-row">
+                               <button id="payBountyButton" class="btn-primary" ${!canPay ? 'disabled' : ''}>Pay Bounty</button>
+                           </div>
+                           ${!canPay ? '<p style="color:#ff6666;font-size:0.85em;">Insufficient credits.</p>' : ''}`
+                        : '<p style="color:#00ff88;">No outstanding bounty. You are free to travel.</p>'
+                    }
                 </div>`;
         }
 
@@ -489,23 +542,45 @@ class UISystem {
             tradeButton.disabled = !offer || !currentShip || gameState.playerShips.length === 0 || gameState.credits + shipSaleValue < offer.cost;
             tradeButton.onclick = () => {
                 if (!offer || !currentShip) return;
-                const netCost = Math.max(0, offer.cost - shipSaleValue);
+                const net = offer.cost - shipSaleValue;
+                const netLine = net > 0
+                    ? `Net cost: ${net} credits`
+                    : `Net gain: +${-net} credits`;
                 this.showConfirmModal({
                     title: 'Trade In Ship',
                     lines: [
-                        `Selling: ${currentShip.name || '?'} — trade-in: +${shipSaleValue} credits`,
-                        `Buying: ${offer.stats.type || '?'}`,
+                        `Trading: ${currentShip.name || '?'} (${currentShip.shipType || '?'}) — value: ${shipSaleValue} cr`,
+                        `For: ${offer.stats.type || '?'} — cost: ${offer.cost} cr`,
                         `Hull ${offer.stats.hull} · Shields ${offer.stats.shields} · Laser ${offer.stats.laser} · Engine ${offer.stats.engine}`,
-                        `New ship cost: ${offer.cost} credits · Net: ${netCost} credits`,
+                        netLine,
                     ],
                     creditsBefore: gameState.credits,
-                    creditsAfter: gameState.credits - netCost,
+                    creditsAfter: gameState.credits - net,
                     onConfirm: () => {
                         if (StationSystem.tradeInShip(gameState, currentShip, offer.stats, offer.cost)) {
                             gameState.selectedShip = gameState.playerShips[gameState.playerShips.length - 1];
                             this.currentStationOffer = null;
                             this.updateStationScreen(gameState);
                         }
+                    }
+                });
+            };
+        }
+
+        const payBountyBtn = document.getElementById('payBountyButton');
+        if (payBountyBtn) {
+            payBountyBtn.onclick = () => {
+                const bounty = gameState.bounty || 0;
+                if (bounty <= 0 || gameState.credits < bounty) return;
+                this.showConfirmModal({
+                    title: 'Pay Bounty',
+                    lines: [`Clear bounty of ${bounty} credits and restore clean record.`],
+                    creditsBefore: gameState.credits,
+                    creditsAfter: gameState.credits - bounty,
+                    onConfirm: () => {
+                        gameState.credits -= bounty;
+                        gameState.bounty = 0;
+                        this.updateStationScreen(gameState);
                     }
                 });
             };
@@ -605,7 +680,7 @@ class UISystem {
     }
 
     static generateNewShipStats() {
-        const typeData = CONSTANTS.SHIP_TYPES[Math.floor(Math.random() * CONSTANTS.SHIP_TYPES.length)];
+        const typeData = CONSTANTS.SHIP_TYPES.filter(t => !t.internal)[Math.floor(Math.random() * CONSTANTS.SHIP_TYPES.filter(t => !t.internal).length)];
         return {
             hull: Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.HULL_MIN, CONSTANTS.SHIP_STATS.HULL_MAX) * typeData.hullMult)),
             shields: Math.max(0, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.SHIELDS_MIN, CONSTANTS.SHIP_STATS.SHIELDS_MAX) * typeData.shieldMult)),
@@ -666,7 +741,8 @@ class UISystem {
                 const pips = '●'.repeat(activeTurnShip.actionsRemaining) + '○'.repeat(2 - activeTurnShip.actionsRemaining);
                 activeTurnHtml = `
                     <div class="header-3" style="background-color:#002200;color:#00ff44;">Active: ${activeTurnShip.name || '?'} <span style="color:#88ff88;font-size:0.85em;letter-spacing:3px;">${pips}</span></div>
-                    ${this.renderShipTable([activeTurnShip], { showStats: true })}`;
+                    ${this.renderShipTable([activeTurnShip], { showStats: true })}
+                    ${this.renderStatusEffects(activeTurnShip)}`;
             }
 
             let actionsHtml = '';
@@ -725,9 +801,22 @@ class UISystem {
                             <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
                         </div>
                         <p style="color:#ffee44;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere to fire EMP — damages shields and locks abilities on all ships in the yellow radius</p>`;
+                } else if (!isAnimating && mode === 'detonate') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ff6600;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere to detonate — blast damages all ships in radius</p>`;
+                } else if (!isAnimating && mode === 'repair_beam') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#00ff88;font-size:0.8em;margin-top:0.5em;text-align:center;">Click an allied ship in the green range circle to repair it</p>`;
                 } else {
+                    const overheated = activeTurnShip.isOverheated;
                     const dis     = !hasActions || isAnimating ? 'disabled' : '';
-                    const fireDis = !hasActions || !hasValidTargets || isAnimating ? 'disabled' : '';
+                    const fireDis = !hasActions || !hasValidTargets || isAnimating || overheated ? 'disabled' : '';
 
                     // Special move buttons — one per move the ship has
                     const cooldowns = activeTurnShip.specialMoveCooldowns || {};
@@ -736,9 +825,9 @@ class UISystem {
                         if (!moveDef) return '';
                         const cd = cooldowns[moveId] || 0;
                         const onCd  = cd > 0;
-                        const btnDis = onCd || !hasActions || isAnimating ? 'disabled' : '';
+                        const btnDis = onCd || !hasActions || isAnimating || overheated ? 'disabled' : '';
                         const label  = onCd ? `${moveDef.name} (${cd})` : moveDef.name;
-                        const color  = onCd ? '#555' : '#cc99ff';
+                        const color  = onCd || overheated ? '#555' : '#cc99ff';
                         return `<button class="btn-primary combat-special-btn" ${btnDis} data-move-id="${moveId}" style="color:${color};">${label}</button>`;
                     }).join('');
 
@@ -768,7 +857,8 @@ class UISystem {
                         : '<span style="color:#ff5555;">[ENEMY]</span>';
                     logPanel.innerHTML = `
                         <div class="header-3" style="background-color:${headerColor};color:#fff;">Selected: ${sel.name || '?'} ${badge}</div>
-                        ${this.renderShipTable([sel], { showStats: true })}`;
+                        ${this.renderShipTable([sel], { showStats: true })}
+                        ${this.renderStatusEffects(sel)}`;
                 } else {
                     logPanel.innerHTML = '';
                 }
@@ -822,6 +912,16 @@ class UISystem {
                     if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
                         combat.playerCloak(activeShip);
                     }
+                } else if (moveId === 'summon_drone') {
+                    if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                        combat.playerSummonDrone(activeShip);
+                    }
+                } else if (moveId === 'detonate') {
+                    combat.playerMode = 'detonate';
+                    this.updateCombatScreen(gameState, combat);
+                } else if (moveId === 'repair_beam') {
+                    combat.playerMode = 'repair_beam';
+                    this.updateCombatScreen(gameState, combat);
                 } else {
                     combat.playerMode = moveId;
                     this.updateCombatScreen(gameState, combat);

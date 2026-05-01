@@ -407,6 +407,68 @@ body {
     margin-top: 0.5em;
 }
 
+.status-effects-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 4px 6px 2px;
+}
+
+.status-badge {
+    font-size: 0.72em;
+    font-weight: bold;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    border-radius: 3px;
+}
+
+.status-dusty {
+    background: rgba(100, 150, 255, 0.18);
+    border: 1px solid #6699ee;
+    color: #aaccff;
+}
+
+.status-cloaked {
+    background: rgba(0, 220, 150, 0.12);
+    border: 1px solid #00cc88;
+    color: #88ffcc;
+}
+
+.status-frozen {
+    background: rgba(140, 220, 255, 0.18);
+    border: 1px solid #88ddff;
+    color: #ccf0ff;
+}
+
+.status-overheated {
+    background: rgba(255, 100, 30, 0.18);
+    border: 1px solid #ff6622;
+    color: #ffaa66;
+}
+
+.status-drone {
+    background: rgba(255, 160, 40, 0.15);
+    border: 1px solid #ff9922;
+    color: #ffcc77;
+}
+
+/* Floating tooltip */
+.game-tooltip {
+    position: fixed;
+    z-index: 9999;
+    display: none;
+    max-width: 280px;
+    padding: 6px 10px;
+    background: rgba(6, 10, 20, 0.96);
+    border: 1px solid #334466;
+    border-radius: 4px;
+    color: #bbc8dd;
+    font-size: 0.78em;
+    line-height: 1.45;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+}
+
 .action-button {
     background-color: rgba(30, 30, 30, 0.6);
     border: 1px solid #ffffff;

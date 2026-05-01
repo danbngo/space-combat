@@ -136,49 +136,46 @@ function assignFleetNames(ships) {
     });
 }
 
-// Returns the nearest point inside (or on the boundary of) the ship's movement oval
+// Effective engine value accounting for the frozen status effect.
+function getEffectiveEngine(ship) {
+    return ship.isFrozen
+        ? Math.max(1, ship.engine * CONSTANTS.FROZEN_MOVE_MULT)
+        : ship.engine;
+}
+
+// Build the movement-oval for a ship in ship-local space (no rotation — caller handles frame).
+function _shipMovementOval(ship) {
+    const eng = getEffectiveEngine(ship);
+    return new Oval(
+        eng * CONSTANTS.COMBAT_MOVE_OVAL_OFFSET, 0,
+        eng * CONSTANTS.COMBAT_MOVE_OVAL_MAJOR,
+        eng * CONSTANTS.COMBAT_MOVE_OVAL_MINOR,
+        0,
+    );
+}
+
+// Returns the nearest point inside (or on the boundary of) the ship's movement oval.
 function clampToMovementOval(ship, tx, ty) {
     const dx = tx - ship.x, dy = ty - ship.y;
     const cos = Math.cos(ship.rotation), sin = Math.sin(ship.rotation);
-    const localX = dx * cos + dy * sin;
+    const localX =  dx * cos + dy * sin;
     const localY = -dx * sin + dy * cos;
 
-    const ellipseCx = ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_OFFSET;
-    const major = ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_MAJOR;
-    const minor = ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_MINOR;
-
-    const ex = localX - ellipseCx;
-    const ey = localY;
-    const nx = ex / major, ny = ey / minor;
-
-    let clampedLocalX, clampedLocalY;
-    if (nx * nx + ny * ny <= 1) {
-        clampedLocalX = localX;
-        clampedLocalY = localY;
-    } else {
-        const t = Math.atan2(ny, nx);
-        clampedLocalX = ellipseCx + major * Math.cos(t);
-        clampedLocalY = minor * Math.sin(t);
-    }
+    const clamped = _shipMovementOval(ship).clampPoint(localX, localY);
 
     return {
-        x: ship.x + clampedLocalX * cos - clampedLocalY * sin,
-        y: ship.y + clampedLocalX * sin + clampedLocalY * cos
+        x: ship.x + clamped.x * cos - clamped.y * sin,
+        y: ship.y + clamped.x * sin + clamped.y * cos,
     };
 }
 
-// Returns true if world point (tx, ty) is inside the ship's movement oval
+// Returns true if world point (tx, ty) is inside the ship's movement oval.
 function isWithinMovementOval(ship, tx, ty) {
     const dx = tx - ship.x, dy = ty - ship.y;
     const cos = Math.cos(ship.rotation), sin = Math.sin(ship.rotation);
-    // Rotate to ship local space (forward = +X)
-    const localX = dx * cos + dy * sin;
+    const localX =  dx * cos + dy * sin;
     const localY = -dx * sin + dy * cos;
-    // Check inside shifted ellipse
-    const cx = localX - ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_OFFSET;
-    const nx = cx / (ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_MAJOR);
-    const ny = localY / (ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_MINOR);
-    return nx * nx + ny * ny <= 1;
+    return _shipMovementOval(ship).containsPoint(localX, localY);
 }
 
 // Returns true if target is within the forward cone of the tractor beam emitter.

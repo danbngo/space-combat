@@ -1,0 +1,14 @@
+// Assembles all partial constants into the single global CONSTANTS object.
+const CONSTANTS = Object.assign(
+    {},
+    CONSTANTS_CORE,
+    CONSTANTS_GALAXY,
+    CONSTANTS_SHIPS,
+    CONSTANTS_COMBAT,
+    CONSTANTS_ASTEROIDS,
+    CONSTANTS_MODULES,
+    CONSTANTS_SPECIAL_MOVES,
+    CONSTANTS_STATION,
+    CONSTANTS_AI,
+    CONSTANTS_DUST,
+);

@@ -1,0 +1,6 @@
+const CONSTANTS_STATION = {
+    REPAIR_COST:        50,
+    REPAIR_AMOUNT:      50,
+    NEW_SHIP_BASE_COST: 800,
+    STATION_OFFER_COUNT: 4,
+};

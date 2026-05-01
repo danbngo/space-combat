@@ -5,8 +5,8 @@
  *   state: string,
  *   credits: number,
  *   systems: Array<{id:number, name:string, x:number, y:number, visited:boolean, resourceLevel:number, connections:number[]}>,
- *   routeFleets: Set<string>,
- *   combatRouteKey: string|null,
+ *   routeFleets: Map<string, Array>,
+ *   bounty: number,
  *   currentSystem: object,
  *   selectedSystem: object|null,
  *   selectedShip: Ship|null,
@@ -19,6 +19,9 @@ let gameState = null;
 let combat = null;
 let lastTime = Date.now();
 let animationFrameId = null;
+
+// Callback to resume travel after a mid-route combat resolves.
+let _travelContinuation = null;
 
 const GameController = {
     init: function() {
@@ -42,9 +45,9 @@ const GameController = {
         gameState = {
             state: GAME_STATE.TITLE,
             credits: CONSTANTS.PLAYER_STARTING_CREDITS,
+            bounty: 0,
             systems: systems,
             routeFleets: routeFleets,
-            combatRouteKey: null,
             currentSystem: startingSystem,
             selectedSystem: startingSystem,
             selectedShip: null,
@@ -121,6 +124,9 @@ const GameController = {
         document.getElementById('modulesTab').addEventListener('click', () => {
             UISystem.setStationTab('modules', gameState);
         });
+        document.getElementById('courthouseTab').addEventListener('click', () => {
+            UISystem.setStationTab('courthouse', gameState);
+        });
         
         document.getElementById('leaveStationButton').addEventListener('click', () => {
             gameState.state = GAME_STATE.GALAXY;
@@ -159,6 +165,8 @@ const GameController = {
             UISystem.currentStationOffer = null;
             UISystem.currentModuleOffer = null;
             combat = null;
+            _travelContinuation = null;
+            if (galaxyRenderer) galaxyRenderer._travelAnim = null;
             this.initializeGameState();
             UISystem.showScreen('titleScreen');
         });
@@ -185,54 +193,201 @@ const GameController = {
         const fromSystem = gameState.currentSystem;
         const routeKey = getRouteKey(fromSystem.id, targetSystem.id);
 
+        // Encounters sorted by position along the route
+        const encounters = (gameState.routeFleets.get(routeKey) || []).slice().sort((a, b) => a.position - b.position);
+
         const arrive = () => {
+            if (galaxyRenderer) galaxyRenderer._travelAnim = null;
             SpaceTravel.travelToSystem(fromSystem, targetSystem);
             SpaceTravel.revealAdjacentSystems(targetSystem, gameState.systems);
             gameState.currentSystem = targetSystem;
+            gameState.selectedSystem = targetSystem;
             UISystem.showScreen('galaxyScreen');
             UISystem.updateGalaxyScreen(gameState);
         };
 
-        if (gameState.routeFleets.has(routeKey)) {
-            galaxyRenderer.animateTravel(fromSystem, targetSystem, () => {
-                this.showEncounterModal(fromSystem, targetSystem, routeKey);
-            }, arrive);
+        if (galaxyRenderer) galaxyRenderer.startTravelAnim(fromSystem, targetSystem);
+        this.processEncounters(fromSystem, targetSystem, routeKey, encounters, 0, arrive);
+    },
+
+    processEncounters: function(fromSystem, targetSystem, routeKey, encounters, index, onArrival) {
+        if (index >= encounters.length) {
+            if (galaxyRenderer) galaxyRenderer.animateTravelSegment(1.0, onArrival);
+            else onArrival();
+            return;
+        }
+
+        const encounter = encounters[index];
+        const continueNext = () => this.processEncounters(fromSystem, targetSystem, routeKey, encounters, index + 1, onArrival);
+
+        if (galaxyRenderer) {
+            galaxyRenderer.animateTravelSegment(encounter.position, () => {
+                this.showFactionEncounterModal(encounter, routeKey, continueNext, onArrival);
+            });
         } else {
-            galaxyRenderer.animateTravel(fromSystem, targetSystem, null, arrive);
+            this.showFactionEncounterModal(encounter, routeKey, continueNext, onArrival);
         }
     },
 
-    showEncounterModal: function(fromSystem, targetSystem, routeKey) {
-        const fleetData = gameState.routeFleets.get(routeKey);
-        const fleetSize = fleetData.size;
-        document.getElementById('encounterModalBody').innerHTML =
-            `<p>An enemy fleet of <strong>${fleetSize} ships</strong> is blocking the route to ${targetSystem.name}!</p>`;
-        document.getElementById('encounterModal').style.display = 'flex';
+    showFactionEncounterModal: function(encounter, routeKey, onContinue, onArrival) {
+        const factionData = CONSTANTS.FACTIONS.find(f => f.id === encounter.faction);
+        const factionName = factionData ? factionData.name : 'Unknown';
+        const factionColor = factionData ? factionData.color : '#ffffff';
 
-        document.getElementById('encounterEngageBtn').onclick = () => {
-            document.getElementById('encounterModal').style.display = 'none';
-            SpaceTravel.travelToSystem(fromSystem, targetSystem);
-            SpaceTravel.revealAdjacentSystems(targetSystem, gameState.systems);
-            gameState.currentSystem = targetSystem;
-            gameState.combatRouteKey = routeKey;
-            gameState.enemyShips = SpaceTravel.generateEnemyFleet(fleetSize);
-            this.startCombat();
+        // Silent pass: police ignore player with no bounty
+        if (encounter.faction === 'police' && !(gameState.bounty > 0)) {
+            onContinue();
+            return;
+        }
+
+        // Pre-generate enemy fleet so detection roll uses real radar totals,
+        // and the same fleet objects are used in combat.
+        const preGenFleet = SpaceTravel.generateEnemyFleet(encounter);
+        const playerRadar = gameState.playerShips.filter(s => s.alive).reduce((sum, s) => sum + s.radar, 0);
+        const enemyRadar  = preGenFleet.reduce((sum, s) => sum + s.radar, 0);
+        const undetected  = playerRadar > enemyRadar;
+
+        // Remove this specific encounter from the route map before starting combat
+        const removeEncounter = () => {
+            const arr = gameState.routeFleets.get(routeKey);
+            if (arr) {
+                const idx = arr.indexOf(encounter);
+                if (idx !== -1) arr.splice(idx, 1);
+                if (arr.length === 0) gameState.routeFleets.delete(routeKey);
+            }
         };
 
-        document.getElementById('encounterRetreatBtn').onclick = () => {
-            document.getElementById('encounterModal').style.display = 'none';
-            if (galaxyRenderer) galaxyRenderer._travelAnim = null;
-            UISystem.showScreen('galaxyScreen');
-            UISystem.updateGalaxyScreen(gameState);
+        const startCombatWith = (addBounty, combatOptions = {}) => {
+            if (addBounty) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
+            removeEncounter();
+            gameState.enemyShips = preGenFleet;
+            _travelContinuation = onContinue;
+            this.startCombat(combatOptions);
         };
+
+        const modalEl    = document.getElementById('encounterModal');
+        const titleEl    = document.getElementById('encounterModalTitle');
+        const bodyEl     = document.getElementById('encounterModalBody');
+        const engageBtn  = document.getElementById('encounterEngageBtn');
+        const retreatBtn = document.getElementById('encounterRetreatBtn');
+
+        const closeModal = () => {
+            modalEl.style.display = 'none';
+            retreatBtn.style.display = '';
+            retreatBtn.textContent = 'Turn Back';
+        };
+
+        titleEl.textContent = `${factionName} Fleet`;
+        titleEl.style.color = factionColor;
+
+        if (undetected) {
+            // ── UNDETECTED: player saw them first ──────────────────────────────────
+            const detLine = `<p style="color:#00ff88;font-size:0.85em;margin-bottom:0.3em;">
+                ✓ Undetected — your radar (${playerRadar}) outpaced theirs (${enemyRadar})
+            </p>`;
+            let fleetDesc = '';
+            if (encounter.faction === 'pirates')   fleetDesc = `A pirate fleet of <strong>${encounter.size} ships</strong> ahead.`;
+            if (encounter.faction === 'police')    fleetDesc = `A police patrol of <strong>${encounter.size} ships</strong> ahead.`;
+            if (encounter.faction === 'merchants') fleetDesc = `A merchant convoy of <strong>${encounter.size} ships</strong> ahead.`;
+
+            bodyEl.innerHTML = `${detLine}<p>${fleetDesc}</p>
+                <p style="color:#aaa;font-size:0.82em;margin-top:0.3em;">Each option has a <strong>50%</strong> chance of success.</p>`;
+
+            engageBtn.textContent = 'Ambush';
+            retreatBtn.textContent = 'Sneak Around';
+            retreatBtn.style.display = '';
+
+            engageBtn.onclick = () => {
+                closeModal();
+                if (Math.random() < 0.5) {
+                    // Ambush success: enemy 0 shields, faces away, player first
+                    startCombatWith(false, { ambush: true, enemyFirst: false });
+                } else {
+                    // Ambush failed: they spotted you, enemy first
+                    startCombatWith(false, { enemyFirst: true });
+                }
+            };
+
+            retreatBtn.onclick = () => {
+                closeModal();
+                if (Math.random() < 0.5) {
+                    // Sneak success: pass without combat
+                    onContinue();
+                } else {
+                    // Sneak failed: they spotted you, enemy first
+                    startCombatWith(false, { enemyFirst: true });
+                }
+            };
+        } else {
+            // ── DETECTED: normal faction encounter ─────────────────────────────────
+            const detLine = `<p style="color:#ff6644;font-size:0.85em;margin-bottom:0.3em;">
+                ✗ Detected — their radar (${enemyRadar}) overpowered yours (${playerRadar})
+            </p>`;
+
+            const playerBounty = gameState.bounty || 0;
+            let willAttack = false;
+            if (encounter.faction === 'pirates') {
+                willAttack = Math.random() < CONSTANTS.FLEET_PIRATE_ATTACK_CHANCE;
+            } else if (encounter.faction === 'police' && playerBounty > 0) {
+                willAttack = Math.random() < CONSTANTS.FLEET_POLICE_ATTACK_CHANCE;
+            }
+
+            if (willAttack) {
+                let msg = '';
+                if (encounter.faction === 'pirates')
+                    msg = `A pirate fleet of <strong>${encounter.size} ships</strong> is moving to intercept!`;
+                else if (encounter.faction === 'police')
+                    msg = `A police patrol of <strong>${encounter.size} ships</strong> has detected your bounty and is closing in!`;
+
+                bodyEl.innerHTML = `${detLine}<p>${msg}</p>`;
+                engageBtn.textContent = 'Fight';
+                retreatBtn.style.display = 'none';
+
+                engageBtn.onclick = () => {
+                    closeModal();
+                    startCombatWith(false, { enemyFirst: true }); // they spotted you
+                };
+            } else {
+                const givesBounty = encounter.faction !== 'pirates';
+                let msg = '', attackLabel = 'Attack';
+                if (encounter.faction === 'pirates') {
+                    msg = `A pirate fleet of <strong>${encounter.size} ships</strong> seems to be ignoring you.`;
+                    attackLabel = 'Attack';
+                } else if (encounter.faction === 'police') {
+                    msg = `A police patrol of <strong>${encounter.size} ships</strong> is nearby.`;
+                    attackLabel = `Attack (+${CONSTANTS.FLEET_ATTACK_BOUNTY} bounty)`;
+                } else if (encounter.faction === 'merchants') {
+                    msg = `A merchant convoy of <strong>${encounter.size} ships</strong> is on the route.`;
+                    attackLabel = `Attack (+${CONSTANTS.FLEET_ATTACK_BOUNTY} bounty)`;
+                }
+
+                bodyEl.innerHTML = `${detLine}<p>${msg}</p>`;
+                engageBtn.textContent = attackLabel;
+                retreatBtn.textContent = 'Pass';
+                retreatBtn.style.display = '';
+
+                engageBtn.onclick = () => {
+                    closeModal();
+                    startCombatWith(givesBounty, { enemyFirst: false }); // player attacks
+                };
+
+                retreatBtn.onclick = () => {
+                    closeModal();
+                    onContinue();
+                };
+            }
+        }
+
+        modalEl.style.display = 'flex';
     },
     
-    startCombat: function() {
+    startCombat: function(options = {}) {
         gameState.state = GAME_STATE.COMBAT;
 
         combat = new Combat(
             gameState.playerShips.map(s => s.clone()),
-            gameState.enemyShips.map(s => s.clone())
+            gameState.enemyShips.map(s => s.clone()),
+            options
         );
 
         UISystem.combatTab = 'actions';
@@ -368,6 +523,21 @@ const GameController = {
                     console.log('[click] → playerEmpBlast');
                     combat.playerEmpBlast(activeShip);
                 }
+            } else if (mode === 'detonate') {
+                if (activeShip && activeShip.alive && activeShip.isDrone) {
+                    console.log('[click] → playerDroneDetonate');
+                    combat.playerDroneDetonate(activeShip);
+                }
+            } else if (mode === 'repair_beam') {
+                if (clickedShip && clickedShip.isPlayer && clickedShip !== activeShip && clickedShip.alive && activeShip && activeShip.actionsRemaining > 0) {
+                    const repairRange = combat.getRepairBeamRange(activeShip);
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    console.log(`[click] repair_beam: dist=${dist.toFixed(0)} range=${repairRange.toFixed(0)}`);
+                    if (dist <= repairRange) {
+                        console.log('[click] → playerRepairBeam');
+                        combat.playerRepairBeam(activeShip, clickedShip);
+                    }
+                }
             } else {
                 // Default: select only
                 if (clickedShip) combat.selectedCombatShip = clickedShip;
@@ -378,6 +548,7 @@ const GameController = {
         });
 
         UISystem.updateCombatScreen(gameState, combat);
+        if (options.enemyFirst) combat.beginEnemyTurn();
         this.startGameLoop();
     },
     
@@ -468,43 +639,46 @@ const GameController = {
     endCombat: function() {
         if (!combat) return;
 
-        // Update actual game state with combat results (fled player ships survive)
         gameState.playerShips = [...combat.playerShips, ...combat.fleedPlayerShips];
         gameState.enemyShips = combat.enemyShips;
 
         cancelAnimationFrame(animationFrameId);
 
         if (combat.won && !combat.playerRetreated) {
-            // Player won — add rewards, clear route, then resume travel animation to destination
             const rewards = combat.getRewards();
             gameState.credits += rewards;
-            if (gameState.combatRouteKey) {
-                gameState.routeFleets.delete(gameState.combatRouteKey);
-                gameState.combatRouteKey = null;
-            }
             gameState.state = GAME_STATE.GALAXY;
             UISystem.showScreen('galaxyScreen');
-            if (galaxyRenderer && galaxyRenderer._travelAnim) {
-                galaxyRenderer.resumeTravel();
+            if (_travelContinuation) {
+                const cont = _travelContinuation;
+                _travelContinuation = null;
+                cont();
             } else {
                 UISystem.updateGalaxyScreen(gameState);
             }
         } else if (combat.lost) {
-            // Player lost
+            _travelContinuation = null;
             if (galaxyRenderer) galaxyRenderer._travelAnim = null;
             UISystem.showGameOver(false, 'All your ships were destroyed. Game Over!');
             gameState.state = GAME_STATE.GAME_OVER;
         } else if (combat.playerRetreated) {
-            // Ships fled combat — already at target system, clear transit animation
-            if (galaxyRenderer) galaxyRenderer._travelAnim = null;
+            // Retreated mid-travel → continue to destination (can't turn back)
             gameState.state = GAME_STATE.GALAXY;
             UISystem.showScreen('galaxyScreen');
-            UISystem.updateGalaxyScreen(gameState);
+            if (_travelContinuation) {
+                const cont = _travelContinuation;
+                _travelContinuation = null;
+                cont();
+            } else {
+                if (galaxyRenderer) galaxyRenderer._travelAnim = null;
+                UISystem.updateGalaxyScreen(gameState);
+            }
         }
     }
 };
 
 // Start game when page loads
 window.addEventListener('DOMContentLoaded', () => {
+    TooltipSystem.init();
     GameController.init();
 });

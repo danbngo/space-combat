@@ -46,6 +46,52 @@ class AISystem {
     }
 
     static decideAction(aiShip, playerShips, combat) {
+        // Drone AI: detonate if an enemy is within blast radius
+        if (aiShip.isDrone) {
+            const blastRadius = CONSTANTS.DRONE_BLAST_RADIUS;
+            const enemiesInBlast = playerShips.filter(s => s.alive && !s.cloaked && distance(aiShip.x, aiShip.y, s.x, s.y) <= blastRadius);
+            if (enemiesInBlast.length >= 1 && Math.random() < 0.65) {
+                combat.performDroneDetonate(aiShip);
+                return;
+            }
+            // Drone acts normally (move/shoot) if not detonating
+        }
+
+        // Overheated: cannot use any abilities or shoot — just move
+        if (aiShip.isOverheated) {
+            const aliveTargets = playerShips.filter(s => s.alive && !s.cloaked);
+            if (aliveTargets.length > 0) this.moveAction(aiShip, playerShips, combat);
+            return;
+        }
+
+        // Carrier AI: summon drone if available and no drone already active
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('summon_drone')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['summon_drone'] || 0;
+            const activeDrones = combat.enemyShips.filter(s => s.isDrone && s.alive).length;
+            if (cd === 0 && activeDrones === 0 && Math.random() < 0.6) {
+                combat.playerSummonDrone(aiShip);
+                return;
+            }
+        }
+
+        // Repair ship AI: repair the most damaged ally if in range
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('repair_beam')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['repair_beam'] || 0;
+            if (cd === 0) {
+                const repairRange = combat.getRepairBeamRange(aiShip);
+                const candidates = combat.enemyShips.filter(s =>
+                    s !== aiShip && s.alive && !s.isDrone &&
+                    s.hull < s.maxHull * 0.75 &&
+                    distance(aiShip.x, aiShip.y, s.x, s.y) <= repairRange
+                );
+                if (candidates.length > 0) {
+                    const mostDamaged = candidates.reduce((a, b) => (a.hull / a.maxHull < b.hull / b.maxHull) ? a : b);
+                    combat.playerRepairBeam(aiShip, mostDamaged);
+                    return;
+                }
+            }
+        }
+
         const alivePlayerShips = playerShips.filter(s => s.alive && !s.cloaked);
         if (alivePlayerShips.length === 0) return;
 
@@ -180,7 +226,13 @@ class AISystem {
         });
 
         const result = aiShip.shootAt(bestTarget, shootRange);
-        console.log(`[AI ${aiShip.name}] FIRE at ${bestTarget.name} dist=${distance(aiShip.x, aiShip.y, bestTarget.x, bestTarget.y).toFixed(0)} hit=${result.hit} dmg=${result.damage}`);
+
+        // Dust cloud: flat 50% additional miss if shooter or target is inside a cloud
+        if (result.hit && (combat.isShipDusty(aiShip) || combat.isShipDusty(bestTarget))) {
+            if (Math.random() < CONSTANTS.DUST_MISS_CHANCE) {
+                result.hit = false; result.damage = 0; result._dustMiss = true;
+            }
+        }
 
         const obstruction = combat.getPathObstructions(aiShip, bestTarget);
         const laserEnd = obstruction ? obstruction.entity : bestTarget;
@@ -222,8 +274,10 @@ class AISystem {
             }, delay);
         } else {
             setTimeout(() => {
-                combat.addFloatingText('Miss!', '#555555', t.x, t.y - 6);
-                combat.addLog(`${combat._shipLabel(aiShip)} → ${combat._shipLabel(t)}: Miss`);
+                const missLabel = result._dustMiss ? 'Dusty Miss!' : 'Miss!';
+                const missColor = result._dustMiss ? '#7799cc' : '#555555';
+                combat.addFloatingText(missLabel, missColor, t.x, t.y - 6);
+                combat.addLog(`${combat._shipLabel(aiShip)} → ${combat._shipLabel(t)}: ${missLabel}`);
             }, delay);
         }
     }
