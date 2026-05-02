@@ -530,10 +530,13 @@ class SpaceTravel {
         const factionData = faction ? CONSTANTS.FACTIONS.find(f => f.id === faction) : null;
         const shipTypes   = factionData ? factionData.shipTypes : null;
         const fleet = [];
+        const factionColor = factionData ? factionData.color : null;
         for (let i = 0; i < size; i++) {
-            fleet.push(shipTypes && shipTypes.length
+            const ship = shipTypes && shipTypes.length
                 ? SpaceTravel.generateShipOfType(shipTypes[Math.floor(Math.random() * shipTypes.length)])
-                : new Ship(0, 0, false));
+                : new Ship(0, 0, false);
+            if (factionColor) ship.factionColor = factionColor;
+            fleet.push(ship);
         }
         assignFleetNames(fleet);
         return fleet;

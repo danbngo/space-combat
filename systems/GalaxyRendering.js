@@ -528,25 +528,38 @@ class GalaxyRenderer {
     }
 
     drawAllRouteFleetDots() {
-        const fallbackVerts = [[2.3, 0], [0.3, -1.0], [-1.8, -1.5], [-1.3, 0], [-1.8, 1.5], [0.3, 1.0]]; // Raider shape default
+        const FACTION_SPRITE = { pirates: 'smuggler', police: 'jammer', merchants: 'repair_ship' };
+        const fallbackVerts  = [[2.3, 0], [0.3, -1.0], [-1.8, -1.5], [-1.3, 0], [-1.8, 1.5], [0.3, 1.0]];
+
         for (const dot of this.routeFleetDots) {
-            const isHovered = this.hoveredRouteFleet && this.hoveredRouteFleet.dotId === dot.dotId;
-            const S = isHovered ? 10 : 7;
+            const isHovered  = this.hoveredRouteFleet && this.hoveredRouteFleet.dotId === dot.dotId;
+            const S          = isHovered ? 10 : 7;
             const baseColor  = dot.color || '#ff4444';
-            const fillColor  = isHovered ? '#ffffff' : baseColor;
             const labelColor = isHovered ? '#ffffff' : baseColor;
 
             this.ctx.save();
             this.ctx.translate(dot.x, dot.y);
             this.ctx.rotate(dot.angle);
-            this.ctx.fillStyle = fillColor;
-            drawShipShape(this.ctx, fallbackVerts, S);
-            this.ctx.fill();
-            if (isHovered) {
-                this.ctx.strokeStyle = '#ffffff';
-                this.ctx.lineWidth = 1.5;
-                this.ctx.stroke();
+
+            const spriteId  = FACTION_SPRITE[dot.faction];
+            const spriteImg = spriteId ? spriteSystem.getImage(spriteId) : null;
+
+            if (spriteImg) {
+                const spriteScale = (S * 4) / Math.max(spriteImg.naturalWidth, spriteImg.naturalHeight);
+                const tint      = isHovered ? '#ffffff' : baseColor;
+                const tintAlpha = isHovered ? 0.20 : 0.50;
+                spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint, tintAlpha });
+            } else {
+                this.ctx.fillStyle = isHovered ? '#ffffff' : baseColor;
+                drawShipShape(this.ctx, fallbackVerts, S);
+                this.ctx.fill();
+                if (isHovered) {
+                    this.ctx.strokeStyle = '#ffffff';
+                    this.ctx.lineWidth = 1.5;
+                    this.ctx.stroke();
+                }
             }
+
             this.ctx.restore();
 
             // Fleet size number above the dot

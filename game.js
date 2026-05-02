@@ -30,6 +30,13 @@ const GameController = {
         initGalaxyRenderer();
         this.setupEventListeners();
         UISystem.showScreen('titleScreen');
+
+        spriteSystem.loadAll({
+            battleship:   'images/battleship.png',
+            jammer:       'images/jammer.png',
+            repair_ship:  'images/repair_ship.png',
+            smuggler:     'images/smuggler.png',
+        });
     },
     
     initializeGameState: function() {
@@ -193,8 +200,12 @@ const GameController = {
         const fromSystem = gameState.currentSystem;
         const routeKey = getRouteKey(fromSystem.id, targetSystem.id);
 
-        // Encounters sorted by position along the route
-        const encounters = (gameState.routeFleets.get(routeKey) || []).slice().sort((a, b) => a.position - b.position);
+        // Positions are stored relative to the canonical (lower-id → higher-id) direction.
+        // If traveling in reverse, mirror each position so the order matches the animation.
+        const reversed = fromSystem.id > targetSystem.id;
+        const encounters = (gameState.routeFleets.get(routeKey) || [])
+            .map(enc => reversed ? { ...enc, _original: enc, position: 1 - enc.position } : enc)
+            .sort((a, b) => a.position - b.position);
 
         const arrive = () => {
             if (galaxyRenderer) galaxyRenderer._travelAnim = null;
@@ -251,7 +262,7 @@ const GameController = {
         const removeEncounter = () => {
             const arr = gameState.routeFleets.get(routeKey);
             if (arr) {
-                const idx = arr.indexOf(encounter);
+                const idx = arr.indexOf(encounter._original || encounter);
                 if (idx !== -1) arr.splice(idx, 1);
                 if (arr.length === 0) gameState.routeFleets.delete(routeKey);
             }
@@ -529,11 +540,12 @@ const GameController = {
                     combat.playerDroneDetonate(activeShip);
                 }
             } else if (mode === 'repair_beam') {
-                if (clickedShip && clickedShip.isPlayer && clickedShip !== activeShip && clickedShip.alive && activeShip && activeShip.actionsRemaining > 0) {
+                if (clickedShip && clickedShip !== activeShip && clickedShip.alive && activeShip && activeShip.actionsRemaining > 0) {
                     const repairRange = combat.getRepairBeamRange(activeShip);
                     const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
-                    console.log(`[click] repair_beam: dist=${dist.toFixed(0)} range=${repairRange.toFixed(0)}`);
-                    if (dist <= repairRange) {
+                    const inZone = isInFiringZone(activeShip, clickedShip);
+                    console.log(`[click] repair_beam: dist=${dist.toFixed(0)} range=${repairRange.toFixed(0)} inZone=${inZone}`);
+                    if (dist <= repairRange && inZone) {
                         console.log('[click] → playerRepairBeam');
                         combat.playerRepairBeam(activeShip, clickedShip);
                     }

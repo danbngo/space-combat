@@ -44,11 +44,11 @@ class UISystem {
     // Returns an HTML string of status-effect badges for a ship.
     static renderStatusEffects(ship) {
         const badges = [];
-        if (ship.isDusty)      badges.push('<span class="status-badge status-dusty">Dusty</span>');
-        if (ship.isFrozen)     badges.push('<span class="status-badge status-frozen">Frozen</span>');
-        if (ship.isOverheated) badges.push('<span class="status-badge status-overheated">Overheated</span>');
-        if (ship.cloaked)      badges.push('<span class="status-badge status-cloaked">Cloaked</span>');
-        if (ship.isDrone)      badges.push(`<span class="status-badge status-drone">Drone (${ship.droneLifetime ?? '?'}t)</span>`);
+        if (ship.statusEffect === 'dust')   badges.push('<span class="status-badge status-dusty">Dusty</span>');
+        if (ship.statusEffect === 'ice')    badges.push('<span class="status-badge status-frozen">Frozen</span>');
+        if (ship.statusEffect === 'plasma') badges.push('<span class="status-badge status-overheated">Overheated</span>');
+        if (ship.cloaked)                   badges.push('<span class="status-badge status-cloaked">Cloaked</span>');
+        if (ship.isDrone)                   badges.push(`<span class="status-badge status-drone">Drone (${ship.droneLifetime ?? '?'}t)</span>`);
         if (!badges.length) return '';
         return `<div class="status-effects-row">${badges.join('')}</div>`;
     }
@@ -814,7 +814,8 @@ class UISystem {
                         </div>
                         <p style="color:#00ff88;font-size:0.8em;margin-top:0.5em;text-align:center;">Click an allied ship in the green range circle to repair it</p>`;
                 } else {
-                    const overheated = activeTurnShip.isOverheated;
+                    const overheated = activeTurnShip.statusEffect === 'plasma';
+                    const hasStatus  = !!activeTurnShip.statusEffect;
                     const dis     = !hasActions || isAnimating ? 'disabled' : '';
                     const fireDis = !hasActions || !hasValidTargets || isAnimating || overheated ? 'disabled' : '';
 
@@ -825,9 +826,10 @@ class UISystem {
                         if (!moveDef) return '';
                         const cd = cooldowns[moveId] || 0;
                         const onCd  = cd > 0;
-                        const btnDis = onCd || !hasActions || isAnimating || overheated ? 'disabled' : '';
+                        const cloakBlocked = moveId === 'cloak' && hasStatus;
+                        const btnDis = onCd || !hasActions || isAnimating || overheated || cloakBlocked ? 'disabled' : '';
                         const label  = onCd ? `${moveDef.name} (${cd})` : moveDef.name;
-                        const color  = onCd || overheated ? '#555' : '#cc99ff';
+                        const color  = onCd || overheated || cloakBlocked ? '#555' : '#cc99ff';
                         return `<button class="btn-primary combat-special-btn" ${btnDis} data-move-id="${moveId}" style="color:${color};">${label}</button>`;
                     }).join('');
 

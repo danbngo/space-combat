@@ -15,6 +15,6 @@ const CONSTANTS_MODULES = {
         { id: 'cloak_drive',          name: 'Cloak Drive',        cost: 450, desc: 'Grants Cloak: become untargetable by lasers and ramming for 2–4 rounds; revealed by taking damage or acting', effect: { type: 'special_move', move: 'cloak' } },
         { id: 'carrier_bay',          name: 'Carrier Bay',        cost: 0,   internal: true, desc: 'Deploy a combat drone that can move, shoot, and detonate', effect: { type: 'special_move', move: 'summon_drone' } },
         { id: 'drone_bay',            name: 'Drone Bay',          cost: 375, desc: 'Grants Deploy Drone: launch a combat drone that can move, shoot, and detonate. Expires in 3 turns.', effect: { type: 'special_move', move: 'summon_drone' } },
-        { id: 'repair_bay',           name: 'Repair Bay',         cost: 400, desc: 'Grants Repair Beam: restore hull and shields to any allied ship in range',         effect: { type: 'special_move', move: 'repair_beam' } },
+        { id: 'repair_bay',           name: 'Repair Bay',         cost: 400, desc: 'Grants Repair Beam: restore hull of any ship in the forward firing arc (allies or enemies)',  effect: { type: 'special_move', move: 'repair_beam' } },
     ],
 };

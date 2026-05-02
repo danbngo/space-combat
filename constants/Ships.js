@@ -24,7 +24,7 @@ const CONSTANTS_SHIPS = {
             vertices: [[2.2, 0], [0.2, -1.0], [-0.6, -1.4], [-1.2, -0.4], [-1.2, 0.4], [-0.6, 1.4], [0.2, 1.0]],
         },
         {
-            type: 'Tanker',
+            type: 'Freighter',
             description: 'A heavily armored bulk freighter repurposed for combat. Exceptional hull and shields at the cost of speed and firepower. Hard to kill, nearly impossible to run.',
             hullMult: 1.8, shieldMult: 1.5, laserMult: 0.7, radarMult: 0.8, engineMult: 0.6,
             vertices: [[1.2, 0], [0.8, -1.0], [-0.3, -1.4], [-1.5, -1.2], [-1.5, 1.2], [-0.3, 1.4], [0.8, 1.0]],
@@ -74,6 +74,7 @@ const CONSTANTS_SHIPS = {
         {
             type: 'Drone',
             internal: true,
+            description: 'Small, expendable support craft deployed by Carriers. Can move and shoot like a normal ship, but explodes on impact.',
             hullMult: 1.0, shieldMult: 0, laserMult: 1.0, radarMult: 0.5, engineMult: 1.0,
             builtinModules: [],
             vertices: [[1.5, 0], [0.3, -0.8], [-0.8, -0.5], [-0.8, 0.5], [0.3, 0.8]],

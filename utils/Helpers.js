@@ -138,7 +138,7 @@ function assignFleetNames(ships) {
 
 // Effective engine value accounting for the frozen status effect.
 function getEffectiveEngine(ship) {
-    return ship.isFrozen
+    return ship.statusEffect === 'ice'
         ? Math.max(1, ship.engine * CONSTANTS.FROZEN_MOVE_MULT)
         : ship.engine;
 }

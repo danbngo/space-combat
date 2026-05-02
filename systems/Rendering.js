@@ -224,11 +224,23 @@ class RenderingSystem {
         const spriteImg = spriteSystem.getImage(spriteId);
 
         if (spriteImg) {
-            // Scale sprite so its longest axis matches the ship's vertex bounding diameter
-            const worldDiam  = maxDist * SIZE * 2;
+            const worldDiam   = maxDist * SIZE * 2;
             const spriteScale = worldDiam / Math.max(spriteImg.naturalWidth, spriteImg.naturalHeight);
 
-            // Tint: hull-flash overrides everything, otherwise team/role color
+            // Shield glow — draw sprite silhouette in 4 corners behind the actual sprite
+            if (!isWreck && (ship.shields > 0 || shieldFlash)) {
+                const glowTint  = shieldFlash ? '#ff2222' : '#00c8ff';
+                const d = worldDiam * 0.13;
+                const outerAlpha = this.ctx.globalAlpha; // preserve cloak/dim alpha
+                this.ctx.save();
+                this.ctx.globalAlpha = outerAlpha * 0.6;
+                [[-d,-d],[-d,d],[d,-d],[d,d]].forEach(([dx,dy]) => {
+                    spriteSystem.draw(this.ctx, spriteId, dx, dy, Math.PI / 2, spriteScale, { tint: glowTint, tintAlpha: 1.0 });
+                });
+                this.ctx.restore();
+            }
+
+            // Tint: hull-flash > wreck > hover > faction/player color
             let tint, tintAlpha;
             if (hullFlash) {
                 tint = '#880000'; tintAlpha = 0.75;
@@ -238,12 +250,14 @@ class RenderingSystem {
                 tint = '#ffffff'; tintAlpha = 0.30;
             } else if (ship.isDrone) {
                 tint = ship.isPlayer ? '#ffaa33' : '#ff7700'; tintAlpha = 0.50;
+            } else if (ship.isPlayer) {
+                tint = '#cccccc'; tintAlpha = 0.35;
             } else {
-                tint = ship.isPlayer ? '#3399ff' : '#ff3333'; tintAlpha = 0.35;
+                tint = ship.factionColor || '#ff4444'; tintAlpha = 0.45;
             }
 
-            // Draw at origin — ctx is already translated+rotated to ship space; alpha=1 inherits outer
-            spriteSystem.draw(this.ctx, spriteId, 0, 0, 0, spriteScale, { tint, tintAlpha });
+            // Sprites face up; +π/2 rotates them to face the game's +X forward direction.
+            spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint, tintAlpha });
         } else {
             // Vector fallback
             let fillColor;
@@ -259,15 +273,15 @@ class RenderingSystem {
             this.ctx.fillStyle = fillColor;
             drawShipShape(this.ctx, verts, SIZE);
             this.ctx.fill();
-        }
 
-        // Shield outline — skip for wreckage, works for both sprite and vector modes
-        if (!isWreck && (ship.shields > 0 || shieldFlash)) {
-            const alpha = shieldFlash ? 1 : 0.8;
-            this.ctx.strokeStyle = shieldFlash ? `rgba(255,0,0,${alpha})` : `rgba(0,200,255,${alpha})`;
-            this.ctx.lineWidth = 1 / this.zoom;
-            drawShipShape(this.ctx, verts, SIZE * 1.5);
-            this.ctx.stroke();
+            // Polygon shield outline (vector ships only)
+            if (!isWreck && (ship.shields > 0 || shieldFlash)) {
+                const alpha = shieldFlash ? 1 : 0.8;
+                this.ctx.strokeStyle = shieldFlash ? `rgba(255,0,0,${alpha})` : `rgba(0,200,255,${alpha})`;
+                this.ctx.lineWidth = 1 / this.zoom;
+                drawShipShape(this.ctx, verts, SIZE * 1.5);
+                this.ctx.stroke();
+            }
         }
 
         this.ctx.restore();
@@ -583,17 +597,40 @@ class RenderingSystem {
     }
 
     drawRepairBeamRange(ship) {
-        const range = ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 1.5;
+        const range    = ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 1.5;
+        const SIZE     = CONSTANTS.SHIP_SIZE;
+        const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType);
+        const verts    = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
+
+        const maxSide    = Math.max(...verts.map(v => Math.abs(v[1])));
+        const sideOffset = maxSide * SIZE * 1.15;
+        const halfBase   = range * 0.65;
+
         this.ctx.save();
-        this.ctx.fillStyle   = 'rgba(0, 255, 100, 0.05)';
-        this.ctx.strokeStyle = 'rgba(0, 255, 100, 0.6)';
-        this.ctx.lineWidth   = 1.5 / this.zoom;
-        this.ctx.setLineDash([6 / this.zoom, 4 / this.zoom]);
+        this.ctx.translate(ship.x, ship.y);
+        this.ctx.rotate(ship.rotation);
+        this.ctx.fillStyle   = 'rgba(0, 255, 100, 0.10)';
+        this.ctx.strokeStyle = 'rgba(0, 255, 100, 0.55)';
+        this.ctx.lineWidth   = 0.5 / this.zoom;
+
+        // Port (−Y side)
         this.ctx.beginPath();
-        this.ctx.arc(ship.x, ship.y, range, 0, Math.PI * 2);
+        this.ctx.moveTo(0, -sideOffset);
+        this.ctx.lineTo(-halfBase, -sideOffset - range);
+        this.ctx.lineTo( halfBase, -sideOffset - range);
+        this.ctx.closePath();
         this.ctx.fill();
         this.ctx.stroke();
-        this.ctx.setLineDash([]);
+
+        // Starboard (+Y side)
+        this.ctx.beginPath();
+        this.ctx.moveTo(0,  sideOffset);
+        this.ctx.lineTo(-halfBase,  sideOffset + range);
+        this.ctx.lineTo( halfBase,  sideOffset + range);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.stroke();
+
         this.ctx.restore();
     }
 
@@ -967,23 +1004,23 @@ class RenderingSystem {
         let stops;
         if (cloud.type === 'ice') {
             stops = [
-                [0,    'rgba(200, 240, 255, 0.28)'],
-                [0.45, 'rgba(160, 220, 255, 0.18)'],
-                [0.8,  'rgba(100, 190, 240, 0.07)'],
+                [0,    'rgba(200, 240, 255, 0.38)'],
+                [0.55, 'rgba(160, 220, 255, 0.28)'],
+                [0.85, 'rgba(100, 190, 240, 0.14)'],
                 [1,    'rgba( 60, 160, 220, 0)'],
             ];
         } else if (cloud.type === 'plasma') {
             stops = [
-                [0,    'rgba(255, 160,  60, 0.26)'],
-                [0.45, 'rgba(255, 100,  30, 0.16)'],
-                [0.8,  'rgba(200,  50,  10, 0.07)'],
+                [0,    'rgba(255, 160,  60, 0.36)'],
+                [0.55, 'rgba(255, 100,  30, 0.24)'],
+                [0.85, 'rgba(200,  50,  10, 0.12)'],
                 [1,    'rgba(160,  20,   0, 0)'],
             ];
         } else { // dust
             stops = [
-                [0,    'rgba(160, 200, 255, 0.22)'],
-                [0.45, 'rgba(120, 170, 240, 0.16)'],
-                [0.8,  'rgba( 80, 130, 200, 0.06)'],
+                [0,    'rgba(160, 200, 255, 0.32)'],
+                [0.55, 'rgba(120, 170, 240, 0.22)'],
+                [0.85, 'rgba( 80, 130, 200, 0.10)'],
                 [1,    'rgba( 60, 100, 180, 0)'],
             ];
         }

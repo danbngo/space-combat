@@ -143,10 +143,8 @@ class Combat {
 
     updateStatusFlags() {
         for (const ship of [...this.playerShips, ...this.enemyShips]) {
-            const inCloud     = this.isShipInCloud(ship);
-            ship.isDusty      = inCloud && this.cloudType === 'dust';
-            ship.isFrozen     = inCloud && this.cloudType === 'ice';
-            ship.isOverheated = inCloud && this.cloudType === 'plasma';
+            const inCloud = this.isShipInCloud(ship);
+            ship.statusEffect = inCloud ? this.cloudType : null;
         }
     }
 
@@ -693,7 +691,7 @@ class Combat {
                         } else if (this.playerMode === 'repair_beam') {
                             const repairRange = this.getRepairBeamRange(activeTurnShip);
                             const inRange = distance(activeTurnShip.x, activeTurnShip.y, ship.x, ship.y) <= repairRange;
-                            isDimmed = !(ship.isPlayer && ship !== activeTurnShip && inRange);
+                            isDimmed = !(ship !== activeTurnShip && inRange && isInFiringZone(activeTurnShip, ship));
                         }
                     } else {
                         isDimmed = ship.isPlayer && ship.actionsRemaining === 0;
@@ -875,7 +873,7 @@ class Combat {
     }
 
     playerShootAt(shooter, target) {
-        if (shooter.isOverheated) {
+        if (shooter.statusEffect === 'plasma') {
             this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`);
             return;
         }
@@ -1345,10 +1343,8 @@ class Combat {
 
     playerRepairBeam(ship, target) {
         ship.decloak();
-        const hullRestored   = Math.min(CONSTANTS.REPAIR_BEAM_HULL,    target.maxHull    - target.hull);
-        const shieldRestored = Math.min(CONSTANTS.REPAIR_BEAM_SHIELDS,  target.maxShields - target.shields);
-        target.hull    = Math.min(target.maxHull,    target.hull    + CONSTANTS.REPAIR_BEAM_HULL);
-        target.shields = Math.min(target.maxShields, target.shields + CONSTANTS.REPAIR_BEAM_SHIELDS);
+        const hullRestored = Math.min(CONSTANTS.REPAIR_BEAM_HULL, target.maxHull - target.hull);
+        target.hull = Math.min(target.maxHull, target.hull + CONSTANTS.REPAIR_BEAM_HULL);
 
         ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
         ship.specialMoveCooldowns['repair_beam'] = CONSTANTS.SPECIAL_MOVES.repair_beam.cooldown;
@@ -1356,13 +1352,9 @@ class Combat {
 
         this.addAnimation({ type: 'tractorBeam', from: { x: ship.x, y: ship.y }, to: { x: target.x, y: target.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
         this.addFloatingText('Repair Beam!', '#00ff88', ship.x, ship.y - 12);
-        if (hullRestored   > 0) this.addFloatingText(`+${hullRestored}`,   '#00ff88', target.x, target.y - 6);
-        if (shieldRestored > 0) this.addFloatingText(`+${shieldRestored}`, '#4488ff', target.x, target.y - 20);
+        if (hullRestored > 0) this.addFloatingText(`+${hullRestored} hull`, '#00ff88', target.x, target.y - 6);
 
-        const parts = [];
-        if (hullRestored   > 0) parts.push(`+${hullRestored} hull`);
-        if (shieldRestored > 0) parts.push(`+${shieldRestored} shlds`);
-        this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: ${parts.join(' ') || 'no change'}`);
+        this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: ${hullRestored > 0 ? `+${hullRestored} hull` : 'no change'}`);
 
         this.checkAutoAdvance(ship);
         UISystem.updateCombatScreen(gameState, this);

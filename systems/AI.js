@@ -58,7 +58,7 @@ class AISystem {
         }
 
         // Overheated: cannot use any abilities or shoot — just move
-        if (aiShip.isOverheated) {
+        if (aiShip.statusEffect === 'plasma') {
             const aliveTargets = playerShips.filter(s => s.alive && !s.cloaked);
             if (aliveTargets.length > 0) this.moveAction(aiShip, playerShips, combat);
             return;
@@ -82,7 +82,8 @@ class AISystem {
                 const candidates = combat.enemyShips.filter(s =>
                     s !== aiShip && s.alive && !s.isDrone &&
                     s.hull < s.maxHull * 0.75 &&
-                    distance(aiShip.x, aiShip.y, s.x, s.y) <= repairRange
+                    distance(aiShip.x, aiShip.y, s.x, s.y) <= repairRange &&
+                    isInFiringZone(aiShip, s)
                 );
                 if (candidates.length > 0) {
                     const mostDamaged = candidates.reduce((a, b) => (a.hull / a.maxHull < b.hull / b.maxHull) ? a : b);
@@ -195,8 +196,7 @@ class AISystem {
         const validTargets = inRange.filter(s => isInFiringZone(aiShip, s));
 
         if (validTargets.length === 0) {
-            // In range but not broadsiding — rotate in place to nearest broadside angle.
-            // No movement here: ships face where they move, so we decouple rotation from movement.
+            // In range but not broadsiding — move in whichever direction achieves the broadside angle.
             let nearest = inRange[0], nearestDist = distance(aiShip.x, aiShip.y, inRange[0].x, inRange[0].y);
             inRange.forEach(s => {
                 const d = distance(aiShip.x, aiShip.y, s.x, s.y);
@@ -208,10 +208,22 @@ class AISystem {
             const rotStbd = normalizeAngle(ang - Math.PI / 2);
             const portDelta = Math.abs(normalizeAngle(rotPort - aiShip.rotation));
             const stbdDelta = Math.abs(normalizeAngle(rotStbd - aiShip.rotation));
-            const side = portDelta < stbdDelta ? 'port' : 'stbd';
-            aiShip.targetRotation = portDelta < stbdDelta ? rotPort : rotStbd;
+            const side      = portDelta < stbdDelta ? 'port' : 'stbd';
+            const moveAngle = portDelta < stbdDelta ? rotPort : rotStbd;
 
-            console.log(`[AI ${aiShip.name}] ROTATE to ${side} broadside toward ${nearest.name} dist=${nearestDist.toFixed(0)}`);
+            const farX = aiShip.x + Math.cos(moveAngle) * aiShip.engine * 20;
+            const farY = aiShip.y + Math.sin(moveAngle) * aiShip.engine * 20;
+            const clamped = clampToMovementOval(aiShip, farX, farY);
+            const dest    = this.avoidObstacles(aiShip, clamped.x, clamped.y, combat);
+
+            const moveDist = distance(aiShip.x, aiShip.y, dest.x, dest.y);
+            if (moveDist > 0.5) {
+                aiShip.targetX        = dest.x;
+                aiShip.targetY        = dest.y;
+                aiShip.targetRotation = Math.atan2(dest.y - aiShip.y, dest.x - aiShip.x);
+                aiShip.isMoving       = true;
+            }
+            console.log(`[AI ${aiShip.name}] STRAFE to ${side} broadside toward ${nearest.name} moveDist=${moveDist.toFixed(0)}`);
             return;
         }
 

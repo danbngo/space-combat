@@ -44,6 +44,6 @@ const CONSTANTS_SPECIAL_MOVES = {
         cloak:        { id: 'cloak',        name: 'Cloak',        desc: 'Become untargetable by lasers and ramming for 2–4 rounds. Revealed by taking damage or using an ability.', actionCost: 1, cooldown: 5 },
         summon_drone: { id: 'summon_drone', name: 'Deploy Drone', desc: 'Deploy a combat drone beside you. It can move, shoot, and detonate. Expires in 3 turns.',                  actionCost: 1, cooldown: 3 },
         detonate:     { id: 'detonate',     name: 'Detonate',     desc: 'Self-destruct — blast damages and knocks back all ships in radius.',                                        actionCost: 1, cooldown: 0 },
-        repair_beam:  { id: 'repair_beam',  name: 'Repair Beam',  desc: 'Restore hull and shields to an allied ship in range.',                                                     actionCost: 1, cooldown: 2 },
+        repair_beam:  { id: 'repair_beam',  name: 'Repair Beam',  desc: 'Restore hull of any ship in the forward firing arc. Does not restore shields.',                          actionCost: 1, cooldown: 2 },
     },
 };

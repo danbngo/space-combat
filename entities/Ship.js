@@ -61,10 +61,8 @@ class Ship {
         this.cloaked = false;
         this.cloakTurnsRemaining = 0;
 
-        // Cloud status effects (set each frame by Combat.updateStatusFlags)
-        this.isDusty      = false;
-        this.isFrozen     = false;
-        this.isOverheated = false;
+        // Active status effect — null | 'dust' | 'ice' | 'plasma' (set each frame by Combat.updateStatusFlags)
+        this.statusEffect = null;
 
         // Animations
         this.targetX = x;
@@ -81,7 +79,7 @@ class Ship {
     }
     
     takeDamage(damage) {
-        if (this.isFrozen && damage > 0) damage = Math.ceil(damage * CONSTANTS.FROZEN_DAMAGE_MULT);
+        if (this.statusEffect === 'ice' && damage > 0) damage = Math.ceil(damage * CONSTANTS.FROZEN_DAMAGE_MULT);
         if (damage > 0) this.decloak();
         const absorbedByShields = Math.min(damage, this.shields);
         const remainingDamage = damage - absorbedByShields;
@@ -198,7 +196,7 @@ class Ship {
     skipTurn() {
         this.actionsRemaining = Math.max(0, this.actionsRemaining - 1);
         const base = Math.floor(this.engine / 2);
-        this.rechargeShields(this.isOverheated ? base * CONSTANTS.OVERHEATED_SHIELD_MULT : base);
+        this.rechargeShields(this.statusEffect === 'plasma' ? base * CONSTANTS.OVERHEATED_SHIELD_MULT : base);
     }
 
     clone() {
