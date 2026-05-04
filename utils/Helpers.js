@@ -136,11 +136,13 @@ function assignFleetNames(ships) {
     });
 }
 
-// Effective engine value accounting for the frozen status effect.
+// Effective engine value accounting for frozen and supercharged status.
 function getEffectiveEngine(ship) {
-    return ship.statusEffect === 'ice'
+    let eng = ship.statusEffect === 'ice'
         ? Math.max(1, ship.engine * CONSTANTS.FROZEN_MOVE_MULT)
         : ship.engine;
+    if ((ship.superchargedTurns || 0) > 0) eng *= 2;
+    return eng;
 }
 
 // Build the movement-oval for a ship in ship-local space (no rotation — caller handles frame).

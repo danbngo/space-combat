@@ -23,13 +23,12 @@ const CONSTANTS_COMBAT = {
     ARENA_GRID_GAP: 40,   // pixel spacing of arena background grid lines
 
     // Ranges and damage
-    SHOOT_RANGE_BASE:    20,   // radar (integer ~10) × SHOOT_RANGE_BASE = max shoot range (px)
+    SHOOT_RANGE_BASE:    15,   // radar (integer ~10) × SHOOT_RANGE_BASE = max shoot range (px)
     RAM_DAMAGE_FACTOR:   0.3,  // engine × factor = hull damage dealt to rammer; target takes 2×
     RAM_PUSHBACK_FACTOR: 0.25, // fraction of move distance the rammed ship is pushed back
 
     // Movement oval (multiples of ship.engine in ship local space; +X = forward)
-    // With engine=10: max forward ≈80px, max sideways ≈25px; rear edge = 10px fwd (no backing up)
-    COMBAT_MOVE_OVAL_OFFSET: 4.5,  // forward offset of oval centre
-    COMBAT_MOVE_OVAL_MAJOR:  3.5,  // semi-major (forward/back axis)
-    COMBAT_MOVE_OVAL_MINOR:  2.5,  // semi-minor (side axis)
+    COMBAT_MOVE_OVAL_OFFSET: 3.375,  // forward offset of oval centre
+    COMBAT_MOVE_OVAL_MAJOR:  2.625,  // semi-major (forward/back axis)
+    COMBAT_MOVE_OVAL_MINOR:  1.875,  // semi-minor (side axis)
 };

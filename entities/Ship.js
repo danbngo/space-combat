@@ -45,6 +45,7 @@ class Ship {
         this.specialMoves = [];
         this.specialMoveCooldowns = {}; // moveId → rounds remaining until usable
         const _typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === this.shipType);
+        this.sizeMult = _typeData?.sizeMult ?? 1.0;
         if (_typeData && _typeData.builtinModules) {
             _typeData.builtinModules.forEach(modId => {
                 this.builtinModules.push(modId);
@@ -78,8 +79,8 @@ class Ship {
         this.cloakTurnsRemaining = 0;
     }
     
-    takeDamage(damage) {
-        if (this.statusEffect === 'ice' && damage > 0) damage = Math.ceil(damage * CONSTANTS.FROZEN_DAMAGE_MULT);
+    takeDamage(damage, isLaser = false) {
+        if (!isLaser && this.statusEffect === 'ice' && damage > 0) damage = Math.ceil(damage * CONSTANTS.FROZEN_DAMAGE_MULT);
         if (damage > 0) this.decloak();
         const absorbedByShields = Math.min(damage, this.shields);
         const remainingDamage = damage - absorbedByShields;
@@ -172,21 +173,23 @@ class Ship {
         this.actionsRemaining = 2;
     }
 
-    shootAt(targetShip, maxRange) {
+    shootAt(targetShip, maxRange, alwaysHit = false) {
         this.isShooting = true;
         this.shootingTarget = targetShip;
 
+        const effectiveLaser = (this.superchargedTurns || 0) > 0 ? this.laserDamage * 2 : this.laserDamage;
+
         let hitChance = 1;
-        if (maxRange !== undefined && maxRange > 0) {
+        if (!alwaysHit && maxRange !== undefined && maxRange > 0) {
             const dist = distance(this.x, this.y, targetShip.x, targetShip.y);
             hitChance = 1 - (Math.min(1, dist / maxRange) * 0.5);
         }
 
-        const isHit = Math.random() < hitChance;
+        const isHit = alwaysHit || Math.random() < hitChance;
         let damage = 0;
 
         if (isHit) {
-            damage = this.laserDamage + randomInt(-3, 3);
+            damage = effectiveLaser + randomInt(-3, 3);
             damage = Math.max(1, damage);
         }
 

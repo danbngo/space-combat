@@ -32,9 +32,9 @@ class Combat {
         this.clouds     = [];
         this.cloudType  = null;
 
-        this.initializeShipPositions(options.ambush);
         this.initAsteroids();
         this.initClouds();
+        this.initializeShipPositions(options.ambush);
         // Apply start-of-turn effects for the first player ship (unless enemy goes first)
         if (!options.enemyFirst) {
             const firstAlive = this.playerShips.find(s => s.alive);
@@ -46,17 +46,24 @@ class Combat {
         const minDist = this.arenaRadius * 0.25;
         const maxDist = this.arenaRadius * 0.75;
         const MIN_SEP = 65;
-        const MAX_TRIES = 30;
+        const MAX_TRIES = 50;
+        const SHIP_R   = CONSTANTS.ASTEROID_SHIP_RADIUS;
         const placed = [];
 
+        const clearOfAsteroids = (px, py) =>
+            this.asteroids.every(a => distance(px, py, a.x, a.y) >= a.radius + SHIP_R + 8);
+
         const placeShip = (ship, arcCenter, faceAway = false) => {
-            let px, py;
+            let px, py, ok = false;
             for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
-                const r = randomFloat(minDist, maxDist);
+                const r   = randomFloat(minDist, maxDist);
                 const ang = arcCenter + randomFloat(-Math.PI / 4, Math.PI / 4);
                 px = this.centerX + Math.cos(ang) * r;
                 py = this.centerY + Math.sin(ang) * r;
-                if (placed.every(p => distance(p.x, p.y, px, py) >= MIN_SEP)) break;
+                if (placed.every(p => distance(p.x, p.y, px, py) >= MIN_SEP) && clearOfAsteroids(px, py)) {
+                    ok = true;
+                    break;
+                }
             }
             ship.x = px;
             ship.y = py;
@@ -73,6 +80,12 @@ class Combat {
         // Enemy ships: 90° arc on the right; face away from center on ambush
         this.enemyShips.forEach(ship => placeShip(ship, 0, ambush));
 
+        // Last resort: remove any asteroid still overlapping a ship after placement
+        const allShips = [...this.playerShips, ...this.enemyShips];
+        this.asteroids = this.asteroids.filter(a =>
+            allShips.every(s => distance(s.x, s.y, a.x, a.y) >= a.radius + SHIP_R + 8)
+        );
+
         if (ambush) {
             this.enemyShips.forEach(ship => { ship.shields = 0; });
             this.addLog('Ambush! Enemy caught off-guard — shields down, backs turned.');
@@ -82,7 +95,6 @@ class Combat {
     initAsteroids() {
         if (Math.random() > CONSTANTS.ASTEROID_SPAWN_CHANCE) return;
         const count = randomInt(CONSTANTS.ASTEROID_MIN_COUNT, CONSTANTS.ASTEROID_MAX_COUNT);
-        const allShips = [...this.playerShips, ...this.enemyShips];
         const placed = [];
 
         for (let n = 0; n < count; n++) {
@@ -95,9 +107,8 @@ class Combat {
                 ax = this.centerX + Math.cos(ang) * dist;
                 ay = this.centerY + Math.sin(ang) * dist;
 
-                const nearShip = allShips.some(s => distance(s.x, s.y, ax, ay) < radius + 65);
                 const nearOther = placed.some(p => distance(p.x, p.y, ax, ay) < radius + p.radius + 8);
-                if (!nearShip && !nearOther) { ok = true; break; }
+                if (!nearOther) { ok = true; break; }
             }
 
             if (ok) {
@@ -150,11 +161,14 @@ class Combat {
 
     updateAsteroidPhysics(deltaTime) {
         const dt = deltaTime / 1000;
+        let anySettled = false;
         for (const asteroid of this.asteroids) {
             if (!asteroid.isMoving) continue;
             asteroid.update(dt);
+            if (!asteroid.isMoving) anySettled = true;
         }
         this.checkAsteroidShipCollisions();
+        if (anySettled) this.resolveOverlaps();
     }
 
     checkAsteroidShipCollisions() {
@@ -171,7 +185,7 @@ class Combat {
 
             for (const ship of allShips) {
                 const dist = distance(asteroid.x, asteroid.y, ship.x, ship.y);
-                const minDist = SHIP_R + asteroid.radius;
+                const minDist = SHIP_R * (ship.sizeMult ?? 1.0) + asteroid.radius;
 
                 if (dist < minDist) {
                     if (!asteroid._activeCollisions.has(ship.name)) {
@@ -182,7 +196,10 @@ class Combat {
                         this.addFloatingText(`-${CONSTANTS.ASTEROID_COLLISION_DAMAGE}`, '#ff4444', ship.x, ship.y - 8);
                         this.addLog(`${this._shipLabel(ship)}: hit by asteroid!`);
 
-                        const ang = Math.atan2(ship.y - asteroid.y, ship.x - asteroid.x);
+                        // Debris pushes away from the originating ship; random asteroids push away from impact point
+                        const knockSrcX = asteroid._debrisSourceX !== undefined ? asteroid._debrisSourceX : asteroid.x;
+                        const knockSrcY = asteroid._debrisSourceY !== undefined ? asteroid._debrisSourceY : asteroid.y;
+                        const ang = Math.atan2(ship.y - knockSrcY, ship.x - knockSrcX);
                         ship.targetX = ship.x + Math.cos(ang) * CONSTANTS.ASTEROID_KNOCKBACK;
                         ship.targetY = ship.y + Math.sin(ang) * CONSTANTS.ASTEROID_KNOCKBACK;
                         ship.isMoving = true;
@@ -229,7 +246,7 @@ class Combat {
                 const a = allShips[i], b = allShips[j];
                 if (!a.alive || !b.alive) continue;
                 const dist = distance(a.x, a.y, b.x, b.y);
-                const minDist = SHIP_R * 2;
+                const minDist = SHIP_R * (a.sizeMult ?? 1.0) + SHIP_R * (b.sizeMult ?? 1.0);
                 if (dist < minDist) {
                     const overlap = minDist - dist;
                     const ang = dist > 0.1 ? Math.atan2(b.y - a.y, b.x - a.x) : randomFloat(0, Math.PI * 2);
@@ -273,7 +290,7 @@ class Combat {
             for (let k = 0; k < this.asteroids.length; k++) {
                 const asteroid = this.asteroids[k];
                 const dist = distance(ship.x, ship.y, asteroid.x, asteroid.y);
-                const minDist = SHIP_R + asteroid.radius;
+                const minDist = SHIP_R * (ship.sizeMult ?? 1.0) + asteroid.radius;
                 if (dist < minDist) {
                     const overlap = minDist - dist;
                     const ang = dist > 0.1 ? Math.atan2(ship.y - asteroid.y, ship.x - asteroid.x) : randomFloat(0, Math.PI * 2);
@@ -405,8 +422,8 @@ class Combat {
         if (rammer.hull <= 0) rammer.alive = false;
         rammer.triggerHitFlash(selfDmg, 0);
 
-        rammer.targetX = asteroid.x - Math.cos(ang) * (asteroid.radius + CONSTANTS.SHIP_SIZE * 2);
-        rammer.targetY = asteroid.y - Math.sin(ang) * (asteroid.radius + CONSTANTS.SHIP_SIZE * 2);
+        rammer.targetX = asteroid.x - Math.cos(ang) * (asteroid.radius + CONSTANTS.SHIP_SIZE * 2 * (rammer.sizeMult ?? 1.0));
+        rammer.targetY = asteroid.y - Math.sin(ang) * (asteroid.radius + CONSTANTS.SHIP_SIZE * 2 * (rammer.sizeMult ?? 1.0));
         rammer.targetRotation = ang;
         rammer.isMoving = true;
         rammer._moveStarted = false;
@@ -564,11 +581,12 @@ class Combat {
     }
 
     getShootRange(ship) {
-        return ship.radar * CONSTANTS.SHOOT_RANGE_BASE;
+        const base = ship.radar * CONSTANTS.SHOOT_RANGE_BASE;
+        return (ship.superchargedTurns || 0) > 0 ? base * 2 : base;
     }
 
     getTractorBeamRange(ship) {
-        return ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
+        return ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT * 0.75;
     }
 
     isAnimating() {
@@ -613,10 +631,10 @@ class Combat {
                     renderingSystem.drawAfterburnerCursor(activeTurnShip, renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
                 }
             }
-            if (this.playerMode === 'warhead' && activeTurnShip.actionsRemaining > 0) {
-                renderingSystem.drawWarheadRange(activeTurnShip);
+            if (this.playerMode === 'bomb' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawBombRange(activeTurnShip);
                 if (renderingSystem.hoveredWorldX !== null) {
-                    renderingSystem.drawWarheadCursor(activeTurnShip, renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
+                    renderingSystem.drawBombCursor(activeTurnShip, renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
                 }
             }
             if (this.playerMode === 'tractor_beam' && activeTurnShip.actionsRemaining > 0) {
@@ -624,20 +642,43 @@ class Combat {
             }
             if (this.playerMode === 'emp_blast' && activeTurnShip.actionsRemaining > 0) {
                 renderingSystem.drawEmpRange(activeTurnShip);
-            }
-            if (this.playerMode === 'detonate' && activeTurnShip.actionsRemaining > 0) {
-                renderingSystem.drawDroneBlastRange(activeTurnShip);
+                if (renderingSystem.hoveredWorldX !== null) {
+                    renderingSystem.drawEmpCursor(activeTurnShip, renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
+                }
             }
             if (this.playerMode === 'repair_beam' && activeTurnShip.actionsRemaining > 0) {
                 renderingSystem.drawRepairBeamRange(activeTurnShip);
+            }
+            if (this.playerMode === 'supercharge' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawSuperchargeRange(activeTurnShip);
+            }
+            if (this.playerMode === 'flash' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawFlashRange(activeTurnShip);
+                if (renderingSystem.hoveredWorldX !== null) {
+                    renderingSystem.drawFlashCursor(activeTurnShip, renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
+                }
+            }
+            if (this.playerMode === 'hack' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawHackRange(activeTurnShip);
+            }
+            if (this.playerMode === 'debris_field' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawDebrisFieldRange(activeTurnShip);
+            }
+            if (this.playerMode === 'mark' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawMarkRange(activeTurnShip);
             }
         }
 
         let hoveredShip = null;
         let hoveredAsteroid = null;
         if (renderingSystem.hoveredWorldX !== null) {
-            hoveredShip = this.getShipAtPosition(renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
-            if (!hoveredShip) hoveredAsteroid = this.getAsteroidAtPosition(renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
+            const rawShip = this.getShipAtPosition(renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
+            if (rawShip) {
+                hoveredShip = (!this.playerMode || this.isInteractableInMode(activeTurnShip, rawShip, null)) ? rawShip : null;
+            } else {
+                const rawAst = this.getAsteroidAtPosition(renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
+                if (rawAst) hoveredAsteroid = (!this.playerMode || this.isInteractableInMode(activeTurnShip, null, rawAst)) ? rawAst : null;
+            }
         }
 
         const dimming = activeTurnShip && activeTurnShip.alive && !this.isAnimating() && this.playerMode;
@@ -645,29 +686,44 @@ class Combat {
         // Clouds — drawn first, behind everything
         this.clouds.forEach(cloud => renderingSystem.drawCloud(cloud));
 
-        // Draw wreckage first so it sits below living ships
+        // Draw wreckage first so it sits below living ships (skip noCorpse units)
         [this.playerShips, this.enemyShips].forEach(fleet => {
             fleet.forEach(ship => {
-                if (!ship.alive) renderingSystem.drawShip(ship, false, false, false, false, true);
+                if (!ship.alive && !ship.noCorpse) renderingSystem.drawShip(ship, false, false, false, false, true);
             });
         });
 
         // Draw asteroids above wreckage, below living ships
         this.asteroids.forEach(asteroid => {
             let astDimmed = false;
-            if (dimming && this.playerMode === 'fire' && activeTurnShip) {
-                const shootRange = this.getShootRange(activeTurnShip);
-                const inRange = distance(activeTurnShip.x, activeTurnShip.y, asteroid.x, asteroid.y) <= shootRange;
-                const inZone  = isInFiringZone(activeTurnShip, asteroid);
-                astDimmed = !(inRange && inZone);
+            if (dimming && activeTurnShip) {
+                if (this.playerMode === 'fire') {
+                    const shootRange = this.getShootRange(activeTurnShip);
+                    const inRange = distance(activeTurnShip.x, activeTurnShip.y, asteroid.x, asteroid.y) <= shootRange;
+                    const inZone  = isInFiringZone(activeTurnShip, asteroid);
+                    astDimmed = !(inRange && inZone);
+                } else if (this.playerMode === 'tractor_beam') {
+                    const tractorRange = this.getTractorBeamRange(activeTurnShip);
+                    const dist = distance(activeTurnShip.x, activeTurnShip.y, asteroid.x, asteroid.y);
+                    const ang = Math.atan2(asteroid.y - activeTurnShip.y, asteroid.x - activeTurnShip.x);
+                    const localAng = normalizeAngle(ang - activeTurnShip.rotation);
+                    astDimmed = !(dist <= tractorRange && Math.abs(localAng) <= CONSTANTS.TRACTOR_BEAM_HALF_ANGLE);
+                }
             }
             renderingSystem.drawAsteroid(asteroid, astDimmed, asteroid === hoveredAsteroid);
         });
 
-        // Draw alive ships
+        // Draw bombs (alive, static, special rendering)
         [this.playerShips, this.enemyShips].forEach(fleet => {
             fleet.forEach(ship => {
-                if (ship.alive) {
+                if (ship.alive && ship.isBomb) renderingSystem.drawBomb(ship);
+            });
+        });
+
+        // Draw alive ships (excluding bombs which are already drawn)
+        [this.playerShips, this.enemyShips].forEach(fleet => {
+            fleet.forEach(ship => {
+                if (ship.alive && !ship.isBomb) {
                     const isActiveTurn = ship === activeTurnShip;
                     const isSelected = ship === this.selectedCombatShip && !this.playerMode;
                     const isHovered = ship === hoveredShip;
@@ -689,9 +745,19 @@ class Combat {
                                 (ship.isPlayer || isInTractorBeamCone(activeTurnShip, ship));
                             isDimmed = !validTractorTarget;
                         } else if (this.playerMode === 'repair_beam') {
-                            const repairRange = this.getRepairBeamRange(activeTurnShip);
-                            const inRange = distance(activeTurnShip.x, activeTurnShip.y, ship.x, ship.y) <= repairRange;
-                            isDimmed = !(ship !== activeTurnShip && inRange && isInFiringZone(activeTurnShip, ship));
+                            isDimmed = false; // cone is always shown; don't dim
+                        } else if (this.playerMode === 'supercharge') {
+                            const range = activeTurnShip.radar * CONSTANTS.SHOOT_RANGE_BASE * 0.75;
+                            const halfAngle = CONSTANTS.SUPERCHARGE_CONE_HALF_ANGLE;
+                            const dist = distance(activeTurnShip.x, activeTurnShip.y, ship.x, ship.y);
+                            const ang = Math.atan2(ship.y - activeTurnShip.y, ship.x - activeTurnShip.x);
+                            const localAng = normalizeAngle(ang - activeTurnShip.rotation);
+                            const inCone = dist <= range && Math.abs(localAng) <= halfAngle;
+                            const isAlly = ship.isPlayer === activeTurnShip.isPlayer;
+                            isDimmed = !(ship !== activeTurnShip && isAlly && inCone);
+                        } else if (this.playerMode === 'hack') {
+                            const dist = distance(activeTurnShip.x, activeTurnShip.y, ship.x, ship.y);
+                            isDimmed = !(ship !== activeTurnShip && dist <= CONSTANTS.HACK_RANGE);
                         }
                     } else {
                         isDimmed = ship.isPlayer && ship.actionsRemaining === 0;
@@ -730,6 +796,10 @@ class Combat {
                 const elapsed = anim.totalDuration - anim.duration;
                 const progress = anim.totalDuration > 0 ? elapsed / anim.totalDuration : 0;
                 renderingSystem.drawEmpBlast(anim.x, anim.y, progress);
+            } else if (anim.type === 'flashBlast') {
+                const elapsed = anim.totalDuration - anim.duration;
+                const progress = anim.totalDuration > 0 ? elapsed / anim.totalDuration : 0;
+                renderingSystem.drawFlashBlast(anim.x, anim.y, progress);
             } else if (anim.type === 'tractorBeam') {
                 const progress = anim.totalDuration > 0 ? 1 - anim.duration / anim.totalDuration : 1;
                 renderingSystem.drawTractorBeam(anim.from, anim.to, progress);
@@ -744,7 +814,6 @@ class Combat {
     // Each candidate in the path (asteroids + same-faction ships) has a 50% chance
     // to intercept; they are tested closest-first so they stack multiplicatively.
     getPathObstructions(shooter, target) {
-        const SHIP_INTERCEPT_R = CONSTANTS.SHIP_SIZE * 3;
         const sx = shooter.x, sy = shooter.y;
         const tx = target.x,  ty = target.y;
         const segLenSq = (tx - sx) ** 2 + (ty - sy) ** 2;
@@ -770,7 +839,7 @@ class Combat {
             const t = ((ship.x - sx) * (tx - sx) + (ship.y - sy) * (ty - sy)) / segLenSq;
             if (t <= 0.05 || t >= 0.95) continue;
             const d = distancePointToLineSegment(ship.x, ship.y, sx, sy, tx, ty);
-            if (d <= SHIP_INTERCEPT_R) {
+            if (d <= CONSTANTS.SHIP_SIZE * 3 * (ship.sizeMult ?? 1.0)) {
                 candidates.push({ entity: ship, type: 'ship', dist: distance(sx, sy, ship.x, ship.y) });
             }
         }
@@ -783,11 +852,11 @@ class Combat {
     }
 
     getShipAtPosition(wx, wy) {
-        const hitRadius = CONSTANTS.SHIP_SIZE * 3;
         for (const fleet of [this.playerShips, this.enemyShips]) {
             for (const ship of fleet) {
                 if (!ship.alive) continue;
                 if (ship.cloaked && !ship.isPlayer) continue; // invisible to click
+                const hitRadius = CONSTANTS.SHIP_SIZE * 3 * (ship.sizeMult ?? 1.0);
                 if (distance(ship.x, ship.y, wx, wy) <= hitRadius) return ship;
             }
         }
@@ -809,7 +878,7 @@ class Combat {
         if (this.state !== COMBAT_STATE.PLAYER_TURN) return;
 
         let nextIndex = this.currentShipIndex + 1;
-        while (nextIndex < this.playerShips.length && !this.playerShips[nextIndex].alive) {
+        while (nextIndex < this.playerShips.length && (!this.playerShips[nextIndex].alive || this.playerShips[nextIndex].isBomb)) {
             nextIndex++;
         }
 
@@ -818,9 +887,36 @@ class Combat {
         } else {
             this.currentShipIndex = nextIndex;
             this.playerMode = null;
-            this.applyStartOfTurnEffects(this.playerShips[nextIndex]);
-            UISystem.updateCombatScreen(gameState, this);
+            const nextShip = this.playerShips[nextIndex];
+            if (nextShip.isDrone) {
+                UISystem.updateCombatScreen(gameState, this);
+                setTimeout(() => this.processDroneTurn(nextShip), CONSTANTS.AI_DECISION_DELAY);
+            } else if ((nextShip.berserkTurns || 0) > 0) {
+                UISystem.updateCombatScreen(gameState, this);
+                setTimeout(() => this.processBerserkPlayerTurn(nextShip), CONSTANTS.AI_DECISION_DELAY);
+            } else {
+                this.applyStartOfTurnEffects(nextShip);
+                UISystem.updateCombatScreen(gameState, this);
+            }
         }
+    }
+
+    // Run AI actions for a player-owned drone. Called instead of waiting for player input.
+    processDroneTurn(drone) {
+        if (!drone.alive) {
+            if (this.state === COMBAT_STATE.PLAYER_TURN) this.nextPlayerShip();
+            return;
+        }
+
+        if (drone.actionsRemaining <= 0) {
+            if (this.state === COMBAT_STATE.PLAYER_TURN) this.nextPlayerShip();
+            return;
+        }
+
+        drone.actionsRemaining--;
+        AISystem.decideAction(drone, this.enemyShips, this);
+        UISystem.updateCombatScreen(gameState, this);
+        setTimeout(() => this.processDroneTurn(drone), CONSTANTS.AI_DECISION_DELAY);
     }
 
     endPlayerTurn() {
@@ -857,7 +953,12 @@ class Combat {
                     return;
                 }
                 ship.actionsRemaining--;
-                AISystem.decideAction(ship, self.playerShips, self);
+                if ((ship.berserkTurns || 0) > 0) {
+                    const allTargets = [...self.playerShips, ...self.enemyShips].filter(s => s.alive && s !== ship && !s.isBomb);
+                    AISystem.berserkAction(ship, allTargets, self);
+                } else {
+                    AISystem.decideAction(ship, self.playerShips, self);
+                }
                 setTimeout(doAction, CONSTANTS.AI_DECISION_DELAY);
             }
 
@@ -865,6 +966,50 @@ class Combat {
         }
 
         processShip(0);
+    }
+
+    isInteractableInMode(active, ship, asteroid) {
+        const mode = this.playerMode;
+        if (!active || !active.alive || active.actionsRemaining <= 0) return true;
+        if (ship) {
+            if (mode === 'move') {
+                const isRammable = (!ship.isPlayer || ship.isBomb) && !ship.cloaked;
+                return isRammable && isWithinMovementOval(active, ship.x, ship.y);
+            } else if (mode === 'fire') {
+                if (ship.isPlayer || ship.cloaked) return false;
+                return distance(active.x, active.y, ship.x, ship.y) <= this.getShootRange(active) && isInFiringZone(active, ship);
+            } else if (mode === 'tractor_beam') {
+                if (ship === active) return false;
+                const inRange = distance(active.x, active.y, ship.x, ship.y) <= this.getTractorBeamRange(active);
+                return inRange && (ship.isPlayer || isInTractorBeamCone(active, ship));
+            } else if (mode === 'supercharge') {
+                if (ship === active || ship.isBomb || ship.isPlayer === !active.isPlayer) return false;
+                const range = active.radar * CONSTANTS.SHOOT_RANGE_BASE * 0.75;
+                const dist = distance(active.x, active.y, ship.x, ship.y);
+                const localAng = normalizeAngle(Math.atan2(ship.y - active.y, ship.x - active.x) - active.rotation);
+                return dist <= range && Math.abs(localAng) <= CONSTANTS.SUPERCHARGE_CONE_HALF_ANGLE;
+            } else if (mode === 'hack') {
+                return ship !== active && distance(active.x, active.y, ship.x, ship.y) <= CONSTANTS.HACK_RANGE;
+            } else if (mode === 'mark') {
+                const dist = distance(active.x, active.y, ship.x, ship.y);
+                const localAng = normalizeAngle(Math.atan2(ship.y - active.y, ship.x - active.x) - active.rotation);
+                return dist <= CONSTANTS.MARK_RANGE && Math.abs(localAng) <= CONSTANTS.MARK_CONE_HALF_ANGLE;
+            }
+            return true;
+        }
+        if (asteroid) {
+            if (mode === 'move') return isWithinMovementOval(active, asteroid.x, asteroid.y);
+            if (mode === 'fire') {
+                return distance(active.x, active.y, asteroid.x, asteroid.y) <= this.getShootRange(active) && isInFiringZone(active, asteroid);
+            }
+            if (mode === 'tractor_beam') {
+                const dist = distance(active.x, active.y, asteroid.x, asteroid.y);
+                const localAng = normalizeAngle(Math.atan2(asteroid.y - active.y, asteroid.x - active.x) - active.rotation);
+                return dist <= this.getTractorBeamRange(active) && Math.abs(localAng) <= CONSTANTS.TRACTOR_BEAM_HALF_ANGLE;
+            }
+            return true;
+        }
+        return false;
     }
 
     _shipLabel(ship) {
@@ -877,12 +1022,17 @@ class Combat {
             this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`);
             return;
         }
+        if (shooter.blindedTurns > 0) {
+            this.addLog(`${this._shipLabel(shooter)}: cannot fire — blinded!`);
+            return;
+        }
         shooter.decloak();
         const maxRange = this.getShootRange(shooter);
-        const result = shooter.shootAt(target, maxRange);
+        const targetMarked = (target.markedTurns || 0) > 0;
+        const result = shooter.shootAt(target, maxRange, targetMarked);
 
-        // Dust cloud: flat 50% additional miss if shooter or target is inside a cloud
-        if (result.hit && (this.isShipDusty(shooter) || this.isShipDusty(target))) {
+        // Dust cloud: flat 50% additional miss — bypassed if target is marked
+        if (!targetMarked && result.hit && (this.isShipDusty(shooter) || this.isShipDusty(target))) {
             if (Math.random() < CONSTANTS.DUST_MISS_CHANCE) {
                 result.hit = false; result.damage = 0; result._dustMiss = true;
             }
@@ -913,7 +1063,7 @@ class Combat {
             const hullDmg = result.damage - shieldAbsorb;
             setTimeout(() => {
                 const wasCloak = target.cloaked;
-                target.takeDamage(result.damage);
+                target.takeDamage(result.damage, true);
                 if (wasCloak) self.addFloatingText('Revealed!', '#88ffcc', target.x, target.y - 30);
                 target.triggerHitFlash(hullDmg, shieldAbsorb);
                 if (shieldAbsorb > 0) self.addFloatingText(`-${shieldAbsorb}`, '#4488ff', target.x, target.y - 20);
@@ -960,7 +1110,7 @@ class Combat {
             const blocker = obstruction.entity;
             const dmg = shooter.laserDamage;
             const wasCloak = blocker.cloaked;
-            const { shieldAbsorb, hullDmg } = blocker.takeDamage(dmg);
+            const { shieldAbsorb, hullDmg } = blocker.takeDamage(dmg, true);
             if (wasCloak) this.addFloatingText('Revealed!', '#88ffcc', blocker.x, blocker.y - 30);
             blocker.triggerHitFlash(hullDmg, shieldAbsorb);
             if (shieldAbsorb > 0) this.addFloatingText(`-${shieldAbsorb}`, '#4488ff', blocker.x, blocker.y - 20);
@@ -1093,36 +1243,59 @@ class Combat {
         UISystem.updateCombatScreen(gameState, this);
     }
 
-    playerWarhead(ship, tx, ty) {
+    playerPlantBomb(ship, tx, ty) {
         ship.decloak();
-        const blastRadius = CONSTANTS.WARHEAD_BLAST_RADIUS;
+        const bombStats = { hull: CONSTANTS.BOMB_HULL, shields: 0, laser: 0, radar: 0, engine: 0, type: 'Bomb' };
+        const bomb = new Ship(tx, ty, ship.isPlayer, ship.rotation, bombStats);
+        bomb.isBomb = true;
+        bomb.noCorpse = true;
+        bomb.bombLifetime = CONSTANTS.BOMB_LIFETIME;
+        bomb.specialMoves = [];
+        bomb.specialMoveCooldowns = {};
+        bomb.builtinModules = [];
+        bomb.modules = [];
+        bomb.actionsRemaining = 0;
+        bomb.inCombat = true;
+        bomb.name = 'Bomb';
 
-        // All ships — including the firer and allies — can be caught in the blast
-        const allShips = [...this.playerShips, ...this.enemyShips];
-        const inBlast = allShips.filter(s =>
-            s.alive && distance(s.x, s.y, tx, ty) <= blastRadius
-        );
+        if (ship.isPlayer) {
+            this.playerShips.push(bomb);
+        } else {
+            this.enemyShips.push(bomb);
+        }
 
         ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
-        ship.specialMoveCooldowns['warhead'] = CONSTANTS.SPECIAL_MOVES.warhead.cooldown;
+        ship.specialMoveCooldowns['bomb'] = CONSTANTS.SPECIAL_MOVES.bomb.cooldown;
         this.playerMode = null;
 
-        this.addFloatingText('Warhead!', '#ff4400', ship.x, ship.y - 12);
-        this.addLog(`${this._shipLabel(ship)}: Warhead!`);
+        this.addAnimation({ type: 'blinkRing', x: tx, y: ty, duration: 400, totalDuration: 400 });
+        this.addFloatingText('Bomb planted!', '#ff8844', ship.x, ship.y - 16);
+        this.addLog(`${this._shipLabel(ship)}: Bomb planted — detonates in ${CONSTANTS.BOMB_LIFETIME} turns!`);
 
-        // Explosion animation
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    performBombDetonate(bomb) {
+        const blastRadius = CONSTANTS.WARHEAD_BLAST_RADIUS;
+        const tx = bomb.x, ty = bomb.y;
+        const allShips = [...this.playerShips, ...this.enemyShips].filter(s => s !== bomb && s.alive);
+        const inBlast = allShips.filter(s => distance(s.x, s.y, tx, ty) <= blastRadius);
+
+        bomb.hull = 0;
+        bomb.alive = false;
+
+        this.addFloatingText('BOOM!', '#ff4400', tx, ty - 12);
+        this.addLog('Bomb detonated!');
         const blastDur = 750;
         this.addAnimation({ type: 'warheadBlast', x: tx, y: ty, duration: blastDur, totalDuration: blastDur });
 
-        // Apply damage + knockback at explosion peak (~20% in)
         const self = this;
         setTimeout(() => {
             inBlast.forEach(target => {
                 if (!target.alive) return;
                 const dist = distance(tx, ty, target.x, target.y);
                 const falloff = Math.max(0, 1 - dist / blastRadius);
-
-                // Damage: full 1–MAX at center, 1–1 at edge
                 const maxDmg = Math.max(1, Math.round(CONSTANTS.WARHEAD_MAX_DAMAGE * falloff));
                 const dmg = randomInt(1, maxDmg);
                 const shieldAbsorb = Math.min(dmg, target.shields);
@@ -1131,16 +1304,12 @@ class Combat {
                 target.takeDamage(dmg);
                 if (wasCloak) self.addFloatingText('Revealed!', '#88ffcc', target.x, target.y - 30);
                 target.triggerHitFlash(hullDmg, shieldAbsorb);
-
                 if (shieldAbsorb > 0) self.addFloatingText(`-${shieldAbsorb}`, '#4488ff', target.x, target.y - 20);
                 if (hullDmg > 0)      self.addFloatingText(`-${hullDmg}`,      '#ff4444', target.x, target.y - 6);
-
                 const parts = [];
                 if (shieldAbsorb > 0) parts.push(`${shieldAbsorb} shld`);
-                if (hullDmg > 0) parts.push(`${hullDmg} hull`);
-                self.addLog(`${self._shipLabel(ship)} warhead → ${self._shipLabel(target)}: -${parts.join(' -')}`);
-
-                // Knockback — push away from detonation, strongest at center
+                if (hullDmg > 0)      parts.push(`${hullDmg} hull`);
+                self.addLog(`Bomb → ${self._shipLabel(target)}: -${parts.join(' -')}`);
                 const knockbackDist = Math.round(CONSTANTS.WARHEAD_KNOCKBACK * falloff);
                 if (knockbackDist > 0 && dist > 0) {
                     const ang = Math.atan2(target.y - ty, target.x - tx);
@@ -1150,32 +1319,26 @@ class Combat {
                     target.isMoving = true;
                     target._moveStarted = false;
                 }
-
                 if (!target.alive) {
                     self.addAnimation({ type: 'explosion', x: target.x, y: target.y, duration: CONSTANTS.EXPLOSION_DURATION });
                     self.addLog(`${self._shipLabel(target)} destroyed!`);
                 }
             });
-
-            if (inBlast.length === 0) {
-                self.addLog(`${self._shipLabel(ship)} warhead: no ships in blast radius`);
-            }
-
-            // Split asteroids in blast radius
-            const asteroidsToSplit = self.asteroids.filter(a => distance(a.x, a.y, tx, ty) <= blastRadius);
-            asteroidsToSplit.forEach(a => self.splitAsteroid(a, Math.atan2(a.y - ty, a.x - tx)));
+            if (inBlast.length === 0) self.addLog('Bomb: no ships in blast radius');
+            self.asteroids.filter(a => distance(a.x, a.y, tx, ty) <= blastRadius)
+                .forEach(a => self.splitAsteroid(a, Math.atan2(a.y - ty, a.x - tx)));
+            self.checkCombatEnd();
         }, blastDur * 0.2);
 
-        this.checkAutoAdvance(ship);
         UISystem.updateCombatScreen(gameState, this);
     }
 
-    playerEmpBlast(ship) {
+    playerEmpBlast(ship, tx, ty) {
         ship.decloak();
         const blastRadius = CONSTANTS.WARHEAD_BLAST_RADIUS;
         const allShips = [...this.playerShips, ...this.enemyShips];
         const inBlast = allShips.filter(s =>
-            s !== ship && s.alive && distance(s.x, s.y, ship.x, ship.y) <= blastRadius
+            s !== ship && s.alive && distance(s.x, s.y, tx, ty) <= blastRadius
         );
 
         ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
@@ -1186,16 +1349,15 @@ class Combat {
         this.addLog(`${this._shipLabel(ship)}: EMP Blast!`);
 
         const blastDur = 750;
-        this.addAnimation({ type: 'empBlast', x: ship.x, y: ship.y, duration: blastDur, totalDuration: blastDur });
+        this.addAnimation({ type: 'empBlast', x: tx, y: ty, duration: blastDur, totalDuration: blastDur });
 
         const self = this;
         setTimeout(() => {
             inBlast.forEach(target => {
                 if (!target.alive) return;
-                const dist = distance(ship.x, ship.y, target.x, target.y);
+                const dist = distance(tx, ty, target.x, target.y);
                 const falloff = Math.max(0, 1 - dist / blastRadius);
 
-                // Shield damage only — no hull damage; EMP also decloaks targets
                 target.decloak();
                 const maxDmg = Math.max(1, Math.round(CONSTANTS.WARHEAD_MAX_DAMAGE * falloff));
                 const dmg = randomInt(1, maxDmg);
@@ -1206,35 +1368,17 @@ class Combat {
                     self.addFloatingText(`-${shieldDmg}`, '#44eeff', target.x, target.y - 20);
                 }
 
-                // Max all ability cooldowns
                 if (target.specialMoveCooldowns && target.specialMoves) {
                     target.specialMoves.forEach(moveId => {
                         const moveDef = CONSTANTS.SPECIAL_MOVES[moveId];
-                        if (moveDef) {
-                            target.specialMoveCooldowns[moveId] = moveDef.cooldown;
-                        }
+                        if (moveDef) target.specialMoveCooldowns[moveId] = moveDef.cooldown;
                     });
                 }
                 self.addFloatingText('JAMMED', '#44eeff', target.x, target.y - 6);
-
                 self.addLog(`${self._shipLabel(ship)} EMP → ${self._shipLabel(target)}: -${shieldDmg} shields, abilities jammed`);
             });
 
-            if (inBlast.length === 0) {
-                self.addLog(`${self._shipLabel(ship)} EMP: no other ships in range`);
-            }
-
-            // Caster always takes full shield damage (center of blast, falloff = 1)
-            if (ship.alive) {
-                const selfDmg = randomInt(1, CONSTANTS.WARHEAD_MAX_DAMAGE);
-                const selfShieldDmg = Math.min(selfDmg, ship.shields);
-                ship.shields = Math.max(0, ship.shields - selfShieldDmg);
-                if (selfShieldDmg > 0) {
-                    ship.triggerHitFlash(0, selfShieldDmg);
-                    self.addFloatingText(`-${selfShieldDmg}`, '#44eeff', ship.x, ship.y - 20);
-                }
-                self.addLog(`${self._shipLabel(ship)} EMP self: -${selfShieldDmg} shields`);
-            }
+            if (inBlast.length === 0) self.addLog(`${self._shipLabel(ship)} EMP: no ships in range`);
         }, blastDur * 0.2);
 
         this.checkAutoAdvance(ship);
@@ -1243,16 +1387,27 @@ class Combat {
 
     playerSummonDrone(carrier) {
         carrier.decloak();
-        const spawnAngle = carrier.rotation + Math.PI * 0.5;
         const spawnDist = CONSTANTS.ASTEROID_SHIP_RADIUS * 2 + 8;
-        const sx = Math.max(50, Math.min(CONSTANTS.GAME_WIDTH - 50, carrier.x + Math.cos(spawnAngle) * spawnDist));
-        const sy = Math.max(50, Math.min(CONSTANTS.GAME_HEIGHT - 50, carrier.y + Math.sin(spawnAngle) * spawnDist));
+        const SHIP_R    = CONSTANTS.ASTEROID_SHIP_RADIUS;
+        let sx, sy;
+        // Try 8 evenly-spaced angles around the carrier; pick first clear of asteroids
+        let placed = false;
+        for (let i = 0; i < 8; i++) {
+            const ang = carrier.rotation + Math.PI * 0.5 + (Math.PI * 2 / 8) * i;
+            const cx = Math.max(50, Math.min(CONSTANTS.GAME_WIDTH  - 50, carrier.x + Math.cos(ang) * spawnDist));
+            const cy = Math.max(50, Math.min(CONSTANTS.GAME_HEIGHT - 50, carrier.y + Math.sin(ang) * spawnDist));
+            if (this.asteroids.every(a => distance(cx, cy, a.x, a.y) >= a.radius + SHIP_R + 8)) {
+                sx = cx; sy = cy; placed = true; break;
+            }
+        }
+        if (!placed) { sx = carrier.x; sy = carrier.y; } // absolute fallback
 
         const droneStats = { hull: CONSTANTS.DRONE_HULL, shields: 0, laser: CONSTANTS.DRONE_LASER, radar: CONSTANTS.DRONE_RADAR, engine: CONSTANTS.DRONE_ENGINE, type: 'Drone' };
         const drone = new Ship(sx, sy, carrier.isPlayer, carrier.rotation, droneStats);
         drone.isDrone = true;
+        drone.noCorpse = true;
         drone.droneLifetime = CONSTANTS.DRONE_LIFETIME;
-        drone.specialMoves = ['detonate'];
+        drone.specialMoves = [];
         drone.specialMoveCooldowns = {};
         drone.builtinModules = [];
         drone.modules = [];
@@ -1278,84 +1433,157 @@ class Combat {
         UISystem.updateCombatScreen(gameState, this);
     }
 
-    playerDroneDetonate(drone) {
-        this.playerMode = null;
-        this.performDroneDetonate(drone);
-    }
-
-    performDroneDetonate(drone) {
-        const blastRadius = CONSTANTS.DRONE_BLAST_RADIUS;
-        const tx = drone.x, ty = drone.y;
-        const allShips = [...this.playerShips, ...this.enemyShips].filter(s => s !== drone && s.alive);
-        const inBlast = allShips.filter(s => distance(s.x, s.y, tx, ty) <= blastRadius);
-
-        drone.hull = 0;
-        drone.alive = false;
-
-        this.addFloatingText('DETONATE!', '#ff6600', tx, ty - 12);
-        this.addLog(`${this._shipLabel(drone)}: DETONATED!`);
-        this.addAnimation({ type: 'warheadBlast', x: tx, y: ty, duration: 750, totalDuration: 750 });
-
-        const self = this;
-        setTimeout(() => {
-            self.addAnimation({ type: 'explosion', x: tx, y: ty, duration: CONSTANTS.EXPLOSION_DURATION, totalDuration: CONSTANTS.EXPLOSION_DURATION });
-            inBlast.forEach(target => {
-                if (!target.alive) return;
-                const dist = distance(tx, ty, target.x, target.y);
-                const falloff = Math.max(0, 1 - dist / blastRadius);
-                const maxDmg = Math.max(1, Math.round(CONSTANTS.DRONE_MAX_DAMAGE * falloff));
-                const dmg = randomInt(1, maxDmg);
-                const shieldAbsorb = Math.min(dmg, target.shields);
-                const hullDmg = dmg - shieldAbsorb;
-                const wasCloak = target.cloaked;
-                target.takeDamage(dmg);
-                if (wasCloak) self.addFloatingText('Revealed!', '#88ffcc', target.x, target.y - 30);
-                target.triggerHitFlash(hullDmg, shieldAbsorb);
-                if (shieldAbsorb > 0) self.addFloatingText(`-${shieldAbsorb}`, '#4488ff', target.x, target.y - 20);
-                if (hullDmg > 0)      self.addFloatingText(`-${hullDmg}`,      '#ff4444', target.x, target.y - 6);
-                const parts = [];
-                if (shieldAbsorb > 0) parts.push(`${shieldAbsorb} shld`);
-                if (hullDmg > 0)      parts.push(`${hullDmg} hull`);
-                self.addLog(`Drone blast → ${self._shipLabel(target)}: -${parts.join(' -')}`);
-                const knockDist = Math.round(CONSTANTS.DRONE_KNOCKBACK * falloff);
-                if (knockDist > 0 && dist > 0) {
-                    const ang = Math.atan2(target.y - ty, target.x - tx);
-                    target.targetX = target.x + Math.cos(ang) * knockDist;
-                    target.targetY = target.y + Math.sin(ang) * knockDist;
-                    target.isMoving = true;
-                    target._moveStarted = false;
-                }
-                if (!target.alive) {
-                    self.addAnimation({ type: 'explosion', x: target.x, y: target.y, duration: CONSTANTS.EXPLOSION_DURATION });
-                    self.addLog(`${self._shipLabel(target)} destroyed!`);
-                }
-            });
-            if (inBlast.length === 0) self.addLog('Drone blast: no ships in radius');
-            self.checkCombatEnd();
-        }, 150);
-
-        UISystem.updateCombatScreen(gameState, this);
-    }
-
     getRepairBeamRange(ship) {
         return ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 1.5;
     }
 
-    playerRepairBeam(ship, target) {
+    getRepairBeamConeTargets(ship) {
+        const range = this.getRepairBeamRange(ship);
+        const halfAngle = CONSTANTS.REPAIR_BEAM_CONE_HALF_ANGLE;
+        const allies = ship.isPlayer ? this.playerShips : this.enemyShips;
+        return allies.filter(s => {
+            if (s === ship || !s.alive || s.isBomb) return false;
+            const dist = distance(ship.x, ship.y, s.x, s.y);
+            if (dist > range) return false;
+            const ang = Math.atan2(s.y - ship.y, s.x - ship.x);
+            const localAng = normalizeAngle(ang - ship.rotation);
+            return Math.abs(localAng) <= halfAngle;
+        });
+    }
+
+    playerRepairBeam(ship) {
         ship.decloak();
-        const hullRestored = Math.min(CONSTANTS.REPAIR_BEAM_HULL, target.maxHull - target.hull);
-        target.hull = Math.min(target.maxHull, target.hull + CONSTANTS.REPAIR_BEAM_HULL);
+        const targets = this.getRepairBeamConeTargets(ship);
 
         ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
         ship.specialMoveCooldowns['repair_beam'] = CONSTANTS.SPECIAL_MOVES.repair_beam.cooldown;
         this.playerMode = null;
 
-        this.addAnimation({ type: 'tractorBeam', from: { x: ship.x, y: ship.y }, to: { x: target.x, y: target.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
         this.addFloatingText('Repair Beam!', '#00ff88', ship.x, ship.y - 12);
-        if (hullRestored > 0) this.addFloatingText(`+${hullRestored} hull`, '#00ff88', target.x, target.y - 6);
 
-        this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: ${hullRestored > 0 ? `+${hullRestored} hull` : 'no change'}`);
+        if (targets.length === 0) {
+            this.addLog(`${this._shipLabel(ship)} repair beam: no allies in forward cone`);
+        } else {
+            targets.forEach(target => {
+                const hullRestored = Math.min(CONSTANTS.REPAIR_BEAM_HULL, target.maxHull - target.hull);
+                target.hull = Math.min(target.maxHull, target.hull + CONSTANTS.REPAIR_BEAM_HULL);
+                this.addAnimation({ type: 'tractorBeam', from: { x: ship.x, y: ship.y }, to: { x: target.x, y: target.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
+                if (hullRestored > 0) this.addFloatingText(`+${hullRestored} hull`, '#00ff88', target.x, target.y - 6);
+                this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: ${hullRestored > 0 ? `+${hullRestored} hull` : 'full'}`);
+            });
+        }
 
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    playerSupercharge(ship, target) {
+        ship.decloak();
+        target.shields = target.maxShields;
+        target.superchargedTurns = 1;
+
+        ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+        ship.specialMoveCooldowns['supercharge'] = CONSTANTS.SPECIAL_MOVES.supercharge.cooldown;
+        this.playerMode = null;
+
+        this.addAnimation({ type: 'tractorBeam', from: { x: ship.x, y: ship.y }, to: { x: target.x, y: target.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
+        this.addFloatingText('Supercharge!', '#ffdd00', ship.x, ship.y - 12);
+        this.addFloatingText('SUPERCHARGED!', '#ffdd00', target.x, target.y - 18);
+        this.addFloatingText('+shields', '#00ffff', target.x, target.y - 6);
+        this.addLog(`${this._shipLabel(ship)} → ${this._shipLabel(target)}: SUPERCHARGED! Shields fully restored`);
+
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    playerHack(ship, target) {
+        ship.decloak();
+        target.berserkTurns = CONSTANTS.BERSERK_TURNS;
+        if (target.cloaked) target.decloak();
+
+        ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+        ship.specialMoveCooldowns['hack'] = CONSTANTS.SPECIAL_MOVES.hack.cooldown;
+        this.playerMode = null;
+
+        this.addAnimation({ type: 'tractorBeam', from: { x: ship.x, y: ship.y }, to: { x: target.x, y: target.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
+        this.addFloatingText('Hacked!', '#ff44ff', ship.x, ship.y - 12);
+        this.addFloatingText('BERSERK!', '#ff44ff', target.x, target.y - 18);
+        this.addLog(`${this._shipLabel(ship)} hacked ${this._shipLabel(target)} — BERSERK for ${CONSTANTS.BERSERK_TURNS} turns!`);
+
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    playerMark(ship, target) {
+        ship.decloak();
+        target.markedTurns = CONSTANTS.MARK_TURNS;
+        if (target.cloaked) target.decloak();
+
+        ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+        ship.specialMoveCooldowns['mark'] = CONSTANTS.SPECIAL_MOVES.mark.cooldown;
+        this.playerMode = null;
+
+        this.addAnimation({ type: 'tractorBeam', from: { x: ship.x, y: ship.y }, to: { x: target.x, y: target.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
+        this.addFloatingText('Marked!', '#ff8800', ship.x, ship.y - 12);
+        this.addFloatingText('MARKED!', '#ff8800', target.x, target.y - 18);
+        this.addLog(`${this._shipLabel(ship)} marked ${this._shipLabel(target)} — auto-hit for ${CONSTANTS.MARK_TURNS} turns!`);
+
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    processBerserkPlayerTurn(ship) {
+        if (!ship.alive || (ship.berserkTurns || 0) <= 0) {
+            if (this.state === COMBAT_STATE.PLAYER_TURN) this.nextPlayerShip();
+            return;
+        }
+        if (ship.actionsRemaining <= 0) {
+            if (this.state === COMBAT_STATE.PLAYER_TURN) this.nextPlayerShip();
+            return;
+        }
+
+        ship.actionsRemaining--;
+        const allShips = [...this.playerShips, ...this.enemyShips].filter(s => s.alive && s !== ship && !s.isBomb);
+        AISystem.berserkAction(ship, allShips, this);
+        UISystem.updateCombatScreen(gameState, this);
+        setTimeout(() => this.processBerserkPlayerTurn(ship), CONSTANTS.AI_DECISION_DELAY);
+    }
+
+    playerFlash(ship, tx, ty) {
+        ship.decloak();
+        const range       = CONSTANTS.FLASH_RANGE;
+        const blastRadius = CONSTANTS.FLASH_BLAST_RADIUS;
+
+        // Clamp origin to range
+        const d = distance(ship.x, ship.y, tx, ty);
+        if (d > range) { tx = ship.x + (tx - ship.x) / d * range; ty = ship.y + (ty - ship.y) / d * range; }
+
+        const allShips = [...this.playerShips, ...this.enemyShips].filter(s => s.alive);
+        const hit = allShips.filter(s => distance(tx, ty, s.x, s.y) <= blastRadius);
+
+        this.addAnimation({ type: 'flashBlast', x: tx, y: ty, duration: 500, totalDuration: 500 });
+        this.addFloatingText('Flash!', '#ffffaa', ship.x, ship.y - 12);
+
+        const self = this;
+        setTimeout(() => {
+            hit.forEach(t => {
+                t.hull = Math.max(0, t.hull - CONSTANTS.FLASH_DAMAGE);
+                if (t.hull <= 0) t.alive = false;
+                t.blindedTurns = CONSTANTS.FLASH_BLIND_TURNS;
+                t.triggerHitFlash(CONSTANTS.FLASH_DAMAGE, 0);
+                self.addFloatingText('Blinded!', '#ffffaa', t.x, t.y - 18);
+                self.addFloatingText(`-${CONSTANTS.FLASH_DAMAGE}`, '#ffff44', t.x, t.y - 6);
+                if (!t.alive) {
+                    self.addAnimation({ type: 'explosion', x: t.x, y: t.y, duration: CONSTANTS.EXPLOSION_DURATION, totalDuration: CONSTANTS.EXPLOSION_DURATION });
+                    self.addLog(`${self._shipLabel(t)}: destroyed!`);
+                }
+            });
+            self.addLog(`${self._shipLabel(ship)} Flash → ${hit.length} ship(s) blinded`);
+        }, 300);
+
+        ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+        ship.specialMoveCooldowns['flash'] = CONSTANTS.SPECIAL_MOVES.flash.cooldown;
+        this.playerMode = null;
         this.checkAutoAdvance(ship);
         UISystem.updateCombatScreen(gameState, this);
     }
@@ -1376,7 +1604,6 @@ class Combat {
     playerTractorBeam(ship, target) {
         ship.decloak();
 
-        // Beam animation fires first at current positions
         this.addAnimation({
             type: 'tractorBeam',
             from: { x: ship.x, y: ship.y },
@@ -1385,16 +1612,29 @@ class Combat {
             totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED
         });
 
-        // Target moves 1/3 of the way toward puller (down from midpoint to reduce collision risk)
         const dx = target.x - ship.x;
         const dy = target.y - ship.y;
-        target.targetX = target.x - dx / 3;
-        target.targetY = target.y - dy / 3;
-        target.targetRotation = Math.atan2(ship.y - target.y, ship.x - target.x);
-        target.isMoving = true;
-        target._moveStarted = false;
 
-        // Puller moves 1/6 of the way toward target (50% of what the target moved)
+        if (target instanceof Asteroid) {
+            // Pull asteroid 1/3 of the way toward ship; give it a velocity toward the ship
+            const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            target.x -= dx / 3;
+            target.y -= dy / 3;
+            target.vx = (-dx / dist) * CONSTANTS.ASTEROID_SPLIT_SPEED;
+            target.vy = (-dy / dist) * CONSTANTS.ASTEROID_SPLIT_SPEED;
+            target.isMoving = true;
+            this.addFloatingText('Tractor!', '#00eeff', target.x, target.y - 6);
+            this.addLog(`${this._shipLabel(ship)} tractor beam → asteroid`);
+        } else {
+            // Ship: target moves 1/3 toward puller, puller moves 1/6 toward target
+            target.targetX = target.x - dx / 3;
+            target.targetY = target.y - dy / 3;
+            target.targetRotation = Math.atan2(ship.y - target.y, ship.x - target.x);
+            target.isMoving = true;
+            target._moveStarted = false;
+            this.addLog(`${this._shipLabel(ship)} tractor beam → ${this._shipLabel(target)}`);
+        }
+
         ship.targetX = ship.x + dx / 6;
         ship.targetY = ship.y + dy / 6;
         ship.targetRotation = Math.atan2(target.y - ship.y, target.x - ship.x);
@@ -1406,7 +1646,38 @@ class Combat {
         this.playerMode = null;
 
         this.addFloatingText('Tractor Beam!', '#00eeff', ship.x, ship.y - 12);
-        this.addLog(`${this._shipLabel(ship)} tractor beam → ${this._shipLabel(target)}`);
+
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    playerDebrisField(ship) {
+        ship.decloak();
+        const count = randomInt(CONSTANTS.DEBRIS_FIELD_MIN, CONSTANTS.DEBRIS_FIELD_MAX);
+        const halfAngle = CONSTANTS.DEBRIS_FIELD_CONE_HALF_ANGLE;
+        const launchDist = CONSTANTS.DEBRIS_FIELD_LAUNCH_DIST;
+        const speed = CONSTANTS.DEBRIS_FIELD_SPEED;
+        const radius = CONSTANTS.ASTEROID_MIN_RADIUS;
+        const srcX = ship.x, srcY = ship.y;
+
+        for (let i = 0; i < count; i++) {
+            const spread = randomFloat(-halfAngle, halfAngle);
+            const ang = ship.rotation + Math.PI + spread;
+            const ax = ship.x + Math.cos(ang) * launchDist;
+            const ay = ship.y + Math.sin(ang) * launchDist;
+            const asteroidSpeed = speed * randomFloat(0.45, 1.0);
+            const asteroid = new Asteroid(ax, ay, radius, Math.cos(ang) * asteroidSpeed, Math.sin(ang) * asteroidSpeed);
+            asteroid._debrisSourceX = srcX;
+            asteroid._debrisSourceY = srcY;
+            this.asteroids.push(asteroid);
+        }
+
+        ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+        ship.specialMoveCooldowns['debris_field'] = CONSTANTS.SPECIAL_MOVES.debris_field.cooldown;
+        this.playerMode = null;
+
+        this.addFloatingText('Debris Field!', '#cc8844', ship.x, ship.y - 12);
+        this.addLog(`${this._shipLabel(ship)}: Debris Field — ${count} rocks launched!`);
 
         this.checkAutoAdvance(ship);
         UISystem.updateCombatScreen(gameState, this);
@@ -1441,7 +1712,7 @@ class Combat {
 
         const ang = Math.atan2(target.y - rammer.y, target.x - rammer.x);
         // Stop just outside collision radius so resolveOverlaps doesn't immediately re-damage both ships
-        const ramStopDist = CONSTANTS.ASTEROID_SHIP_RADIUS * 2 + 8;
+        const ramStopDist = CONSTANTS.ASTEROID_SHIP_RADIUS * ((rammer.sizeMult ?? 1.0) + (target.sizeMult ?? 1.0)) + 8;
         rammer.targetX = target.x - Math.cos(ang) * ramStopDist;
         rammer.targetY = target.y - Math.sin(ang) * ramStopDist;
         rammer.targetRotation = ang;
@@ -1536,18 +1807,65 @@ class Combat {
     }
 
     endEnemyTurn() {
-        // Drone lifetime countdown — decrement and show remaining turns at round end
+        // Drone lifetime countdown — just expire quietly (no explosion)
         [...this.playerShips, ...this.enemyShips].forEach(ship => {
             if (!ship.isDrone || !ship.alive) return;
             ship.droneLifetime--;
             if (ship.droneLifetime <= 0) {
                 ship.hull = 0;
                 ship.alive = false;
-                this.addAnimation({ type: 'explosion', x: ship.x, y: ship.y, duration: CONSTANTS.EXPLOSION_DURATION, totalDuration: CONSTANTS.EXPLOSION_DURATION });
-                this.addFloatingText('Expired!', '#ffaa44', ship.x, ship.y - 12);
-                this.addLog(`${this._shipLabel(ship)}: drone expired`);
+                this.addFloatingText('Expired', '#ffaa44', ship.x, ship.y - 12);
             } else {
                 this.addFloatingText(`${ship.droneLifetime}t left`, '#ffaa44', ship.x, ship.y - 18);
+            }
+        });
+
+        // Bomb countdown — detonate on expiry
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if (!ship.isBomb || !ship.alive) return;
+            ship.bombLifetime--;
+            if (ship.bombLifetime <= 0) {
+                this.performBombDetonate(ship);
+            }
+        });
+
+        // Supercharge expiry
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if (!ship.alive || !(ship.superchargedTurns > 0)) return;
+            ship.superchargedTurns--;
+            if (ship.superchargedTurns === 0) {
+                this.addFloatingText('Supercharge faded', '#ffdd00', ship.x, ship.y - 12);
+                this.addLog(`${this._shipLabel(ship)}: supercharge expired`);
+            }
+        });
+
+        // Berserk expiry
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if (!ship.alive || !(ship.berserkTurns > 0)) return;
+            ship.berserkTurns--;
+            if (ship.berserkTurns === 0) {
+                this.addFloatingText('Berserk faded', '#ff44ff', ship.x, ship.y - 12);
+                this.addLog(`${this._shipLabel(ship)}: berserk expired`);
+            }
+        });
+
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if ((ship.blindedTurns || 0) > 0) {
+                ship.blindedTurns--;
+                if (ship.blindedTurns === 0) {
+                    this.addFloatingText('Sight restored', '#ffffaa', ship.x, ship.y - 12);
+                    this.addLog(`${this._shipLabel(ship)}: blindness expired`);
+                }
+            }
+        });
+
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if ((ship.markedTurns || 0) > 0) {
+                ship.markedTurns--;
+                if (ship.markedTurns === 0) {
+                    this.addFloatingText('Mark faded', '#ff8800', ship.x, ship.y - 12);
+                    this.addLog(`${this._shipLabel(ship)}: mark expired`);
+                }
             }
         });
 
@@ -1578,23 +1896,40 @@ class Combat {
             }
         });
 
+        // Berserk ships get double actions
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if (ship.alive && (ship.berserkTurns || 0) > 0) ship.actionsRemaining *= 2;
+        });
+
         this.round++;
         this.currentShipIndex = 0;
-        while (this.currentShipIndex < this.playerShips.length && !this.playerShips[this.currentShipIndex].alive) {
+        while (this.currentShipIndex < this.playerShips.length &&
+            (!this.playerShips[this.currentShipIndex].alive || this.playerShips[this.currentShipIndex].isBomb)) {
             this.currentShipIndex++;
         }
         this.playerMode = null;
         this.state = COMBAT_STATE.PLAYER_TURN;
-        if (this.currentShipIndex < this.playerShips.length) {
-            this.applyStartOfTurnEffects(this.playerShips[this.currentShipIndex]);
+        const firstShip = this.playerShips[this.currentShipIndex];
+        if (firstShip) {
+            if (firstShip.isDrone) {
+                UISystem.updateCombatScreen(gameState, this);
+                setTimeout(() => this.processDroneTurn(firstShip), CONSTANTS.AI_DECISION_DELAY);
+            } else if ((firstShip.berserkTurns || 0) > 0) {
+                UISystem.updateCombatScreen(gameState, this);
+                setTimeout(() => this.processBerserkPlayerTurn(firstShip), CONSTANTS.AI_DECISION_DELAY);
+            } else {
+                this.applyStartOfTurnEffects(firstShip);
+                UISystem.updateCombatScreen(gameState, this);
+            }
+        } else {
+            UISystem.updateCombatScreen(gameState, this);
         }
-        UISystem.updateCombatScreen(gameState, this);
     }
 
     checkCombatEnd() {
         if (this.state === COMBAT_STATE.ENDED) return;
-        const alivePlayerShips = this.playerShips.filter(s => s.alive && !s.isDrone).length;
-        const aliveEnemyShips  = this.enemyShips.filter(s => s.alive && !s.isDrone).length;
+        const alivePlayerShips = this.playerShips.filter(s => s.alive && !s.isDrone && !s.isBomb).length;
+        const aliveEnemyShips  = this.enemyShips.filter(s => s.alive && !s.isDrone && !s.isBomb).length;
 
         if (aliveEnemyShips === 0) {
             this.won = true;

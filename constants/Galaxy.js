@@ -16,15 +16,20 @@ const CONSTANTS_GALAXY = {
     MIN_SYSTEM_ROUTE_CLEARANCE:  50,  // minimum px a non-endpoint system must be from any route
     ROUTE_NEARBY_THRESHOLD:      80,  // threshold for proximity-connection enforcement pass
     // Route fleet encounters
-    FLEET_MAX_PER_ROUTE:        3,     // max encounter fleets on a single route (0–3 spawned)
+    FLEET_MAX_PER_ROUTE:        1,     // max encounter fleets on a single route (0–1 spawned)
     FLEET_SIZE_MIN:             1,     // min ships in an encounter fleet
     FLEET_SIZE_MAX:             5,     // max ships in an encounter fleet
     FLEET_PIRATE_ATTACK_CHANCE: 0.5,  // prob pirates attack on sight
     FLEET_POLICE_ATTACK_CHANCE: 0.5,  // prob police attack when player has bounty
     FLEET_ATTACK_BOUNTY:        1000, // bounty gained from attacking police or merchants
 
-    // Travel animation
-    GALAXY_TRAVEL_ANIM_DURATION: 1000, // ms for the ship travel animation on galaxy map
+    // Travel animation — speed in galaxy-units/ms per engine point
+    // At engine=10 and a 195-unit (average) route this gives ~1000 ms transit time
+    GALAXY_TRAVEL_SPEED_FACTOR: 0.0195,
+
+    // In-game time: days = routeDistance / (avgEngine * TRAVEL_TIME_SCALE)
+    // At engine=10 and 195-unit route: 195 / (10 * 19.5) = 1.0 day
+    TRAVEL_TIME_SCALE: 19.5,
 
     // Renderer
     GALAXY_DEFAULT_ZOOM:    4,

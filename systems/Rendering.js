@@ -93,15 +93,14 @@ class RenderingSystem {
             if (combat && combat.playerMode && !this._mouseIsDown) {
                 const active = combat.playerShips[combat.currentShipIndex];
                 if (active && active.alive) {
-                    const hitRadius = CONSTANTS.SHIP_SIZE * 3;
                     const hovered = [...combat.playerShips, ...combat.enemyShips].find(
-                        s => s.alive && distance(s.x, s.y, world.x, world.y) <= hitRadius
+                        s => s.alive && distance(s.x, s.y, world.x, world.y) <= CONSTANTS.SHIP_SIZE * 3 * (s.sizeMult ?? 1.0)
                     ) || null;
                     if (hovered !== this._lastHoveredDebugShip) {
                         this._lastHoveredDebugShip = hovered;
                         if (hovered) {
                             const dist       = distance(active.x, active.y, hovered.x, hovered.y);
-                            const shootRange = active.radar * CONSTANTS.SHOOT_RANGE_BASE;
+                            const shootRange = (active.radar * CONSTANTS.SHOOT_RANGE_BASE) * ((active.superchargedTurns || 0) > 0 ? 2 : 1);
                             const inRange    = dist <= shootRange;
                             const inZone     = isInFiringZone(active, hovered);
                             const inOval     = isWithinMovementOval(active, hovered.x, hovered.y);
@@ -191,6 +190,31 @@ class RenderingSystem {
         this.ctx.fill();
     }
 
+    // Returns the hex color for a ship's current most-prominent status effect, or null
+    _statusEffectColor(ship) {
+        if ((ship.markedTurns || 0) > 0)       return '#ff8800';
+        if ((ship.berserkTurns || 0) > 0)      return '#ff44ff';
+        if ((ship.superchargedTurns || 0) > 0) return '#ffee00';
+        if ((ship.blindedTurns || 0) > 0)      return '#ffffff';
+        if (ship.statusEffect === 'dust')       return '#6688cc';
+        if (ship.statusEffect === 'ice')        return '#44ccff';
+        if (ship.statusEffect === 'plasma')     return '#ff8833';
+        if (ship.cloaked && ship.isPlayer)      return '#aaffee';
+        return null;
+    }
+
+    _statusEffectLabel(ship) {
+        if ((ship.markedTurns || 0) > 0)       return 'MARK';
+        if ((ship.berserkTurns || 0) > 0)      return 'BSRK';
+        if ((ship.superchargedTurns || 0) > 0) return 'SUPR';
+        if ((ship.blindedTurns || 0) > 0)      return 'BLND';
+        if (ship.statusEffect === 'dust')       return 'DUST';
+        if (ship.statusEffect === 'ice')        return 'FRZN';
+        if (ship.statusEffect === 'plasma')     return 'HEAT';
+        if (ship.cloaked && ship.isPlayer)      return 'INVS';
+        return null;
+    }
+
     // isActiveTurn = green ring, isSelected = cyan dashed ring, isHovered = highlight, isDimmed = faded, isWreck = destroyed, isCloaked = stealth, escapeAlpha = fade-out 0→1
     drawShip(ship, isActiveTurn = false, isSelected = false, isHovered = false, isDimmed = false, isWreck = false, isCloaked = false, escapeAlpha = 1) {
         if (isCloaked && !ship.isPlayer) return; // enemy cloaked ships are completely invisible
@@ -198,8 +222,8 @@ class RenderingSystem {
         if (escapeAlpha < 1) this.ctx.globalAlpha = escapeAlpha;
         else if (isCloaked) this.ctx.globalAlpha = 0.5; // player cloaked ships: 50% transparent
         else if (isWreck) this.ctx.globalAlpha = 0.55;
-        else if (isDimmed) this.ctx.globalAlpha = 0.25;
-        const SIZE = CONSTANTS.SHIP_SIZE;
+        // isDimmed uses brightness filter on the body block only — rings stay at full alpha
+        const SIZE = CONSTANTS.SHIP_SIZE * (ship.sizeMult ?? 1.0);
 
         const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType);
         const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
@@ -212,6 +236,7 @@ class RenderingSystem {
         this.ctx.save();
         this.ctx.translate(ship.x, ship.y);
         this.ctx.rotate(ship.rotation);
+        if (isDimmed) this.ctx.filter = 'brightness(30%)';
 
         // Ship body: hull-flash (4-pulse) > hover > default
         const now = Date.now();
@@ -227,16 +252,18 @@ class RenderingSystem {
             const worldDiam   = maxDist * SIZE * 2;
             const spriteScale = worldDiam / Math.max(spriteImg.naturalWidth, spriteImg.naturalHeight);
 
-            // Shield glow — draw sprite silhouette in 4 corners behind the actual sprite
+            // Shield glow — single tinted draw with shadow blur; normal sprite draw follows and overlaps it,
+            // leaving only the shadow halo (which lives in the transparent pixels outside the sprite) visible.
             if (!isWreck && (ship.shields > 0 || shieldFlash)) {
-                const glowTint  = shieldFlash ? '#ff2222' : '#00c8ff';
-                const d = worldDiam * 0.13;
-                const outerAlpha = this.ctx.globalAlpha; // preserve cloak/dim alpha
+                const glowColor = shieldFlash ? '#ff2222' : '#00c8ff';
+                const outerAlpha = this.ctx.globalAlpha;
                 this.ctx.save();
-                this.ctx.globalAlpha = outerAlpha * 0.6;
-                [[-d,-d],[-d,d],[d,-d],[d,d]].forEach(([dx,dy]) => {
-                    spriteSystem.draw(this.ctx, spriteId, dx, dy, Math.PI / 2, spriteScale, { tint: glowTint, tintAlpha: 1.0 });
-                });
+                this.ctx.globalAlpha = outerAlpha * 0.85;
+                this.ctx.shadowColor = glowColor;
+                this.ctx.shadowBlur = 10;
+                this.ctx.shadowOffsetX = 0;
+                this.ctx.shadowOffsetY = 0;
+                spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint: glowColor, tintAlpha: 1.0 });
                 this.ctx.restore();
             }
 
@@ -258,6 +285,15 @@ class RenderingSystem {
 
             // Sprites face up; +π/2 rotates them to face the game's +X forward direction.
             spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint, tintAlpha });
+
+            // Status effect body pulse — overlay a second tinted draw
+            const statusColor = !hullFlash && !isWreck ? this._statusEffectColor(ship) : null;
+            if (statusColor) {
+                const pulseTintAlpha = (Math.sin((Date.now() % 2000) / 2000 * Math.PI * 2) * 0.5 + 0.5) * 0.6;
+                if (pulseTintAlpha > 0.01) {
+                    spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint: statusColor, tintAlpha: pulseTintAlpha });
+                }
+            }
         } else {
             // Vector fallback
             let fillColor;
@@ -268,11 +304,25 @@ class RenderingSystem {
             } else if (isHovered) {
                 fillColor = ship.isPlayer ? '#ffffff' : '#ffaaaa';
             } else {
-                fillColor = ship.isDrone ? (ship.isPlayer ? '#ffaa33' : '#ff7700') : (ship.isPlayer ? '#aaaaaa' : '#ff3333');
+                fillColor = ship.isDrone ? (ship.isPlayer ? '#ffaa33' : '#ff7700') : (ship.isPlayer ? '#aaaaaa' : (ship.factionColor || '#ff3333'));
             }
             this.ctx.fillStyle = fillColor;
             drawShipShape(this.ctx, verts, SIZE);
             this.ctx.fill();
+
+            // Status effect body pulse — overlay a translucent fill in the effect color
+            const statusColorVec = !hullFlash && !isWreck ? this._statusEffectColor(ship) : null;
+            if (statusColorVec) {
+                const pulseAlpha = (Math.sin((Date.now() % 2000) / 2000 * Math.PI * 2) * 0.5 + 0.5) * 0.55;
+                if (pulseAlpha > 0.01) {
+                    const savedAlpha = this.ctx.globalAlpha;
+                    this.ctx.globalAlpha = savedAlpha * pulseAlpha;
+                    this.ctx.fillStyle = statusColorVec;
+                    drawShipShape(this.ctx, verts, SIZE);
+                    this.ctx.fill();
+                    this.ctx.globalAlpha = savedAlpha;
+                }
+            }
 
             // Polygon shield outline (vector ships only)
             if (!isWreck && (ship.shields > 0 || shieldFlash)) {
@@ -309,6 +359,35 @@ class RenderingSystem {
                 this.ctx.setLineDash([]);
             }
 
+            // Berserk: pulsing magenta glow ring
+            if ((ship.berserkTurns || 0) > 0) {
+                const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 150);
+                this.ctx.strokeStyle = `rgba(255, 44, 255, ${0.6 + pulse * 0.4})`;
+                this.ctx.lineWidth = (2 + pulse * 2) / this.zoom;
+                this.ctx.beginPath();
+                this.ctx.arc(0, 0, RING_R * 1.2, 0, Math.PI * 2);
+                this.ctx.stroke();
+            }
+
+            // Marked: pulsing orange targeting ring with crosshair ticks
+            if ((ship.markedTurns || 0) > 0) {
+                const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 150);
+                this.ctx.strokeStyle = `rgba(255, 136, 0, ${0.65 + pulse * 0.35})`;
+                this.ctx.lineWidth = (1.5 + pulse * 1.5) / this.zoom;
+                this.ctx.beginPath();
+                this.ctx.arc(0, 0, RING_R * 1.25, 0, Math.PI * 2);
+                this.ctx.stroke();
+                // Four tick marks at cardinal angles
+                const tickR = RING_R * 1.25;
+                const tickLen = 4 / this.zoom;
+                [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx, dy]) => {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(dx * (tickR - tickLen), dy * (tickR - tickLen));
+                    this.ctx.lineTo(dx * (tickR + tickLen), dy * (tickR + tickLen));
+                    this.ctx.stroke();
+                });
+            }
+
             this.ctx.restore();
         }
 
@@ -320,8 +399,8 @@ class RenderingSystem {
         const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType);
         const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
         // Top of shield outline for this ship type (max vertical vertex × shield scale)
-        const maxSide = Math.max(...verts.map(v => Math.abs(v[1]))) * CONSTANTS.SHIP_SIZE * 1.5;
-        const yBase = -(maxSide + 3); // 3 units above shield top
+        const maxSide = Math.max(...verts.map(v => Math.abs(v[1]))) * CONSTANTS.SHIP_SIZE * (ship.sizeMult ?? 1.0) * 1.5;
+        const yBase = -(maxSide + 10); // lifted to leave gap below bars for status text
 
         const W = 20, H = 1.8, GAP = 1;
 
@@ -367,14 +446,26 @@ class RenderingSystem {
             }
         }
 
+        // Status effect label in the gap between bars and ship top
+        const statusLabel = this._statusEffectLabel(ship);
+        const statusColor = this._statusEffectColor(ship);
+        if (statusLabel && statusColor) {
+            this.ctx.font = `5px monospace`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'alphabetic';
+            this.ctx.fillStyle = statusColor;
+            this.ctx.fillText(statusLabel, 0, -maxSide);
+        }
+
         this.ctx.restore();
     }
 
     // Dashed oval shifted forward — shows where the ship can move this turn
     drawMovementRange(ship) {
-        const offset = ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_OFFSET;
-        const major  = ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_MAJOR;
-        const minor  = ship.engine * CONSTANTS.COMBAT_MOVE_OVAL_MINOR;
+        const eng    = getEffectiveEngine(ship);
+        const offset = eng * CONSTANTS.COMBAT_MOVE_OVAL_OFFSET;
+        const major  = eng * CONSTANTS.COMBAT_MOVE_OVAL_MAJOR;
+        const minor  = eng * CONSTANTS.COMBAT_MOVE_OVAL_MINOR;
         this.ctx.save();
         this.ctx.translate(ship.x, ship.y);
         this.ctx.rotate(ship.rotation);
@@ -405,7 +496,7 @@ class RenderingSystem {
     // Port & starboard firing triangles — each extends perpendicular from the ship's side.
     drawShootRange(ship) {
         const range = ship.radar * CONSTANTS.SHOOT_RANGE_BASE;
-        const SIZE  = CONSTANTS.SHIP_SIZE;
+        const SIZE  = CONSTANTS.SHIP_SIZE * (ship.sizeMult ?? 1.0);
         const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType);
         const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
 
@@ -469,6 +560,107 @@ class RenderingSystem {
         this.ctx.beginPath();
         this.ctx.arc(tx, ty, 4 / this.zoom, 0, Math.PI * 2);
         this.ctx.fill();
+        this.ctx.restore();
+    }
+
+    // Rear cone showing debris field launch direction
+    drawDebrisFieldRange(ship) {
+        const halfAngle = CONSTANTS.DEBRIS_FIELD_CONE_HALF_ANGLE;
+        const range = ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * 1.5;
+        this.ctx.save();
+        this.ctx.translate(ship.x, ship.y);
+        this.ctx.rotate(ship.rotation + Math.PI);
+        this.ctx.strokeStyle = 'rgba(200, 136, 68, 0.6)';
+        this.ctx.fillStyle   = 'rgba(200, 136, 68, 0.07)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.setLineDash([5 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, 0);
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
+    }
+
+    // Solid circle showing hack range
+    drawHackRange(ship) {
+        const range = CONSTANTS.HACK_RANGE;
+        this.ctx.save();
+        this.ctx.strokeStyle = 'rgba(255, 68, 255, 0.7)';
+        this.ctx.fillStyle   = 'rgba(255, 68, 255, 0.08)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.arc(ship.x, ship.y, range, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
+    }
+
+    // Forward cone showing mark targeting arc
+    drawMarkRange(ship) {
+        const halfAngle = CONSTANTS.MARK_CONE_HALF_ANGLE;
+        const range = CONSTANTS.MARK_RANGE;
+        this.ctx.save();
+        this.ctx.translate(ship.x, ship.y);
+        this.ctx.rotate(ship.rotation);
+        this.ctx.strokeStyle = 'rgba(255, 136, 0, 0.7)';
+        this.ctx.fillStyle   = 'rgba(255, 136, 0, 0.07)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.setLineDash([5 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, 0);
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
+    }
+
+    // Dashed circle showing flash targeting range
+    drawFlashRange(ship) {
+        const range = CONSTANTS.FLASH_RANGE;
+        this.ctx.save();
+        this.ctx.strokeStyle = 'rgba(255, 255, 140, 0.55)';
+        this.ctx.fillStyle   = 'rgba(255, 255, 140, 0.04)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.setLineDash([5 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.arc(ship.x, ship.y, range, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
+    }
+
+    // Blast-radius preview circle at cursor, clamped to flash range
+    drawFlashCursor(ship, wx, wy) {
+        const range       = CONSTANTS.FLASH_RANGE;
+        const blastRadius = CONSTANTS.FLASH_BLAST_RADIUS;
+        const dist        = distance(ship.x, ship.y, wx, wy);
+        const inside      = dist <= range;
+        const tx = inside ? wx : ship.x + (wx - ship.x) / dist * range;
+        const ty = inside ? wy : ship.y + (wy - ship.y) / dist * range;
+        this.ctx.save();
+        this.ctx.fillStyle   = 'rgba(255, 255, 140, 0.07)';
+        this.ctx.strokeStyle = inside ? 'rgba(255, 255, 80, 0.75)' : 'rgba(255, 255, 140, 0.3)';
+        this.ctx.lineWidth   = 1.5 / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.arc(tx, ty, blastRadius, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+        // Crosshair at center
+        const ch = 4 / this.zoom;
+        this.ctx.strokeStyle = inside ? 'rgba(255, 255, 80, 0.9)' : 'rgba(255, 255, 140, 0.4)';
+        this.ctx.lineWidth   = 1 / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.moveTo(tx - ch, ty); this.ctx.lineTo(tx + ch, ty);
+        this.ctx.moveTo(tx, ty - ch); this.ctx.lineTo(tx, ty + ch);
+        this.ctx.stroke();
         this.ctx.restore();
     }
 
@@ -581,72 +773,137 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
-    drawDroneBlastRange(ship) {
-        const radius = CONSTANTS.DRONE_BLAST_RADIUS;
-        this.ctx.save();
-        this.ctx.fillStyle   = 'rgba(255, 100, 0, 0.08)';
-        this.ctx.strokeStyle = 'rgba(255, 100, 0, 0.8)';
-        this.ctx.lineWidth   = 1.5 / this.zoom;
-        this.ctx.setLineDash([6 / this.zoom, 4 / this.zoom]);
-        this.ctx.beginPath();
-        this.ctx.arc(ship.x, ship.y, radius, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.stroke();
-        this.ctx.setLineDash([]);
-        this.ctx.restore();
-    }
-
     drawRepairBeamRange(ship) {
-        const range    = ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 1.5;
-        const SIZE     = CONSTANTS.SHIP_SIZE;
-        const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType);
-        const verts    = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
-
-        const maxSide    = Math.max(...verts.map(v => Math.abs(v[1])));
-        const sideOffset = maxSide * SIZE * 1.15;
-        const halfBase   = range * 0.65;
+        const range     = ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 1.5;
+        const halfAngle = CONSTANTS.REPAIR_BEAM_CONE_HALF_ANGLE;
 
         this.ctx.save();
         this.ctx.translate(ship.x, ship.y);
         this.ctx.rotate(ship.rotation);
-        this.ctx.fillStyle   = 'rgba(0, 255, 100, 0.10)';
-        this.ctx.strokeStyle = 'rgba(0, 255, 100, 0.55)';
-        this.ctx.lineWidth   = 0.5 / this.zoom;
 
-        // Port (−Y side)
+        this.ctx.fillStyle = 'rgba(0, 255, 100, 0.10)';
         this.ctx.beginPath();
-        this.ctx.moveTo(0, -sideOffset);
-        this.ctx.lineTo(-halfBase, -sideOffset - range);
-        this.ctx.lineTo( halfBase, -sideOffset - range);
+        this.ctx.moveTo(0, 0);
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
         this.ctx.closePath();
         this.ctx.fill();
+
+        this.ctx.strokeStyle = 'rgba(0, 255, 100, 0.55)';
+        this.ctx.lineWidth   = 1 / this.zoom;
+        this.ctx.setLineDash([5 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, 0);
+        this.ctx.lineTo(range * Math.cos(-halfAngle), range * Math.sin(-halfAngle));
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
+        this.ctx.lineTo(0, 0);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        this.ctx.restore();
+    }
+
+    drawSuperchargeRange(ship) {
+        const range     = ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 0.75;
+        const halfAngle = CONSTANTS.SUPERCHARGE_CONE_HALF_ANGLE;
+
+        this.ctx.save();
+        this.ctx.translate(ship.x, ship.y);
+        this.ctx.rotate(ship.rotation);
+
+        this.ctx.fillStyle = 'rgba(255, 220, 0, 0.07)';
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, 0);
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        this.ctx.strokeStyle = 'rgba(255, 220, 0, 0.55)';
+        this.ctx.lineWidth   = 1 / this.zoom;
+        this.ctx.setLineDash([5 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, 0);
+        this.ctx.lineTo(range * Math.cos(-halfAngle), range * Math.sin(-halfAngle));
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
+        this.ctx.lineTo(0, 0);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        this.ctx.restore();
+    }
+
+    drawEmpRange(ship) {
+        const launchDist   = CONSTANTS.WARHEAD_LAUNCH_DIST;
+        const targetRadius = CONSTANTS.WARHEAD_TARGET_RADIUS;
+        const blastRadius  = CONSTANTS.WARHEAD_BLAST_RADIUS;
+        const cx = ship.x + Math.cos(ship.rotation) * launchDist;
+        const cy = ship.y + Math.sin(ship.rotation) * launchDist;
+
+        this.ctx.save();
+
+        this.ctx.strokeStyle = 'rgba(100, 220, 255, 0.4)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(ship.x, ship.y);
+        this.ctx.lineTo(cx, cy);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        this.ctx.strokeStyle = 'rgba(100, 220, 255, 0.7)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.setLineDash([3 / this.zoom, 3 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.arc(cx, cy, targetRadius, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        this.ctx.strokeStyle = 'rgba(100, 220, 255, 0.12)';
+        this.ctx.lineWidth = 0.5 / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.arc(cx, cy, targetRadius + blastRadius, 0, Math.PI * 2);
         this.ctx.stroke();
 
-        // Starboard (+Y side)
+        const ch = 4 / this.zoom;
+        this.ctx.strokeStyle = 'rgba(100, 220, 255, 0.8)';
+        this.ctx.lineWidth = 1 / this.zoom;
         this.ctx.beginPath();
-        this.ctx.moveTo(0,  sideOffset);
-        this.ctx.lineTo(-halfBase,  sideOffset + range);
-        this.ctx.lineTo( halfBase,  sideOffset + range);
-        this.ctx.closePath();
-        this.ctx.fill();
+        this.ctx.moveTo(cx - ch, cy); this.ctx.lineTo(cx + ch, cy);
+        this.ctx.moveTo(cx, cy - ch); this.ctx.lineTo(cx, cy + ch);
         this.ctx.stroke();
 
         this.ctx.restore();
     }
 
-    // Forward-cone tractor beam range indicator
-    drawEmpRange(ship) {
-        const radius = CONSTANTS.WARHEAD_BLAST_RADIUS;
+    drawEmpCursor(ship, wx, wy) {
+        const launchDist   = CONSTANTS.WARHEAD_LAUNCH_DIST;
+        const targetRadius = CONSTANTS.WARHEAD_TARGET_RADIUS;
+        const blastRadius  = CONSTANTS.WARHEAD_BLAST_RADIUS;
+        const acx = ship.x + Math.cos(ship.rotation) * launchDist;
+        const acy = ship.y + Math.sin(ship.rotation) * launchDist;
+
+        const d = distance(acx, acy, wx, wy);
+        const inside = d <= targetRadius;
+        const tx = inside ? wx : acx + (wx - acx) / d * targetRadius;
+        const ty = inside ? wy : acy + (wy - acy) / d * targetRadius;
+
         this.ctx.save();
-        this.ctx.fillStyle   = 'rgba(255, 238, 0, 0.07)';
-        this.ctx.strokeStyle = 'rgba(255, 238, 0, 0.7)';
-        this.ctx.lineWidth   = 1.5 / this.zoom;
-        this.ctx.setLineDash([6 / this.zoom, 4 / this.zoom]);
+
+        this.ctx.fillStyle   = 'rgba(100, 220, 255, 0.08)';
+        this.ctx.strokeStyle = inside ? 'rgba(100, 220, 255, 0.65)' : 'rgba(100, 220, 255, 0.3)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
         this.ctx.beginPath();
-        this.ctx.arc(ship.x, ship.y, radius, 0, Math.PI * 2);
+        this.ctx.arc(tx, ty, blastRadius, 0, Math.PI * 2);
         this.ctx.fill();
         this.ctx.stroke();
-        this.ctx.setLineDash([]);
+
+        const ch = 5 / this.zoom;
+        this.ctx.strokeStyle = inside ? 'rgba(100, 220, 255, 0.95)' : 'rgba(100, 220, 255, 0.4)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.moveTo(tx - ch, ty); this.ctx.lineTo(tx + ch, ty);
+        this.ctx.moveTo(tx, ty - ch); this.ctx.lineTo(tx, ty + ch);
+        this.ctx.stroke();
+
         this.ctx.restore();
     }
 
@@ -710,8 +967,7 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
-    // Warhead targeting: aim circle centered ahead + optional blast-radius preview at cursor
-    drawWarheadRange(ship) {
+    drawBombRange(ship) {
         const launchDist   = CONSTANTS.WARHEAD_LAUNCH_DIST;
         const targetRadius = CONSTANTS.WARHEAD_TARGET_RADIUS;
         const blastRadius  = CONSTANTS.WARHEAD_BLAST_RADIUS;
@@ -758,7 +1014,7 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
-    drawWarheadCursor(ship, wx, wy) {
+    drawBombCursor(ship, wx, wy) {
         const launchDist   = CONSTANTS.WARHEAD_LAUNCH_DIST;
         const targetRadius = CONSTANTS.WARHEAD_TARGET_RADIUS;
         const blastRadius  = CONSTANTS.WARHEAD_BLAST_RADIUS;
@@ -835,6 +1091,41 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
+    drawFlashBlast(x, y, progress) {
+        const blastR = CONSTANTS.FLASH_BLAST_RADIUS;
+        const alpha  = Math.max(0, 1 - progress);
+        this.ctx.save();
+
+        // Bright white-yellow expanding fill
+        const r = blastR * (0.1 + progress * 0.9);
+        this.ctx.globalAlpha = alpha * (progress < 0.2 ? 0.9 : 0.5);
+        this.ctx.fillStyle   = '#ffffcc';
+        this.ctx.beginPath();
+        this.ctx.arc(x, y, Math.max(0.5, r), 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Outer ring
+        this.ctx.globalAlpha = alpha * 0.85;
+        this.ctx.strokeStyle = '#ffff44';
+        this.ctx.lineWidth   = (3 * (1 - progress * 0.8)) / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.arc(x, y, Math.max(0.5, blastR * (0.15 + progress * 0.85)), 0, Math.PI * 2);
+        this.ctx.stroke();
+
+        // Inner burst flash
+        if (progress < 0.25) {
+            const flashT = 1 - progress / 0.25;
+            this.ctx.globalAlpha = flashT * 0.7;
+            this.ctx.fillStyle   = '#ffffff';
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, Math.max(0.5, blastR * 0.5 * flashT), 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
+        this.ctx.globalAlpha = 1;
+        this.ctx.restore();
+    }
+
     drawEmpBlast(x, y, progress) {
         const blastR = CONSTANTS.WARHEAD_BLAST_RADIUS;
         const alpha  = Math.max(0, 1 - progress);
@@ -872,6 +1163,50 @@ class RenderingSystem {
 
         this.ctx.globalAlpha = 1;
         this.ctx.restore();
+    }
+
+    drawBomb(bomb) {
+        if (!bomb.alive) return;
+        const size = CONSTANTS.SHIP_SIZE * 2.5;
+        const pulse = Math.abs(Math.sin(Date.now() / 300));
+
+        this.ctx.save();
+        this.ctx.translate(bomb.x, bomb.y);
+
+        // Outer ring — flashes faster when last turn
+        const speed = bomb.bombLifetime <= 1 ? 150 : 300;
+        const fastPulse = Math.abs(Math.sin(Date.now() / speed));
+        this.ctx.strokeStyle = `rgba(255, ${Math.floor(60 + fastPulse * 120)}, 0, 0.9)`;
+        this.ctx.lineWidth = (2 * (0.5 + fastPulse * 0.5)) / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, size + 2 / this.zoom, 0, Math.PI * 2);
+        this.ctx.stroke();
+
+        // Body
+        this.ctx.fillStyle = bomb.isPlayer ? '#cc7700' : '#882200';
+        this.ctx.strokeStyle = '#ff4400';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, size, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // Inner pulse glow
+        this.ctx.fillStyle = `rgba(255, 200, 0, ${pulse * 0.55})`;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, size * 0.55, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Lifetime countdown
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = `bold ${Math.round(9 / this.zoom)}px monospace`;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(bomb.bombLifetime.toString(), 0, 0);
+
+        this.ctx.restore();
+
+        this.drawShipBars(bomb);
     }
 
     // Expanding ring used for blink departure / arrival flash

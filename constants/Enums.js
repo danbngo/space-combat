@@ -5,6 +5,7 @@ const GAME_STATE = {
     TRAVEL:    'travel',
     COMBAT:    'combat',
     GAME_OVER: 'gameOver',
+    GAME_WON:  'gameWon',
 };
 
 const COMBAT_STATE = {

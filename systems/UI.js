@@ -31,6 +31,7 @@ class UISystem {
             galaxyRenderer.resizeCanvas();
             galaxyRenderer.initializeZoom();
             galaxyRenderer.render(gameState.systems, gameState.currentSystem);
+            galaxyRenderer.startLoop();
         }
     }
 
@@ -47,8 +48,12 @@ class UISystem {
         if (ship.statusEffect === 'dust')   badges.push('<span class="status-badge status-dusty">Dusty</span>');
         if (ship.statusEffect === 'ice')    badges.push('<span class="status-badge status-frozen">Frozen</span>');
         if (ship.statusEffect === 'plasma') badges.push('<span class="status-badge status-overheated">Overheated</span>');
-        if (ship.cloaked)                   badges.push('<span class="status-badge status-cloaked">Cloaked</span>');
-        if (ship.isDrone)                   badges.push(`<span class="status-badge status-drone">Drone (${ship.droneLifetime ?? '?'}t)</span>`);
+        if ((ship.blindedTurns || 0) > 0)      badges.push(`<span class="status-badge status-blinded">Blinded (${ship.blindedTurns}t)</span>`);
+        if ((ship.superchargedTurns || 0) > 0) badges.push(`<span class="status-badge" style="background:#aa8800;color:#ffe066;">Supercharged</span>`);
+        if ((ship.berserkTurns || 0) > 0)      badges.push(`<span class="status-badge" style="background:#880088;color:#ff88ff;">Berserk (${ship.berserkTurns}t)</span>`);
+        if ((ship.markedTurns || 0) > 0)       badges.push(`<span class="status-badge" style="background:#883300;color:#ff8800;">Marked (${ship.markedTurns}t)</span>`);
+        if (ship.cloaked)                       badges.push('<span class="status-badge status-cloaked">Cloaked</span>');
+        if (ship.isDrone)                       badges.push(`<span class="status-badge status-drone">Drone (${ship.droneLifetime ?? '?'}t)</span>`);
         if (!badges.length) return '';
         return `<div class="status-effects-row">${badges.join('')}</div>`;
     }
@@ -143,8 +148,14 @@ class UISystem {
         const bountyHtml = bounty > 0
             ? `<p style="color:#ff4444;font-weight:bold;">Bounty: ${bounty} cr</p>`
             : '';
+        const fame = gameState.fame || 0;
+        const fameColor = fame > 0 ? '#44ff88' : fame < 0 ? '#ff6644' : '#aaa';
+        const fameSign = fame > 0 ? '+' : '';
+        const fameHtml = `<p>Fame: <span style="color:${fameColor};font-weight:${fame !== 0 ? 'bold' : 'normal'};">${fameSign}${fame}</span></p>`;
+        const day = Math.round(gameState.day || 1);
         return `<div class="header-3">Player Status</div>
-                <p>Credits: ${gameState.credits}</p>
+                <p>Credits: ${gameState.credits} &nbsp;·&nbsp; <span style="color:#aaa;">Day ${day}</span></p>
+                ${fameHtml}
                 ${bountyHtml}
                 ${this.renderShipTable(gameState.playerShips, tableOptions)}`;
     }
@@ -172,6 +183,15 @@ class UISystem {
             currentActions.innerHTML = '';
             return;
         }
+        const isAlienCapital = gameState.alienCapitalId !== null && gameState.alienCapitalId !== undefined
+            && gameState.currentSystem.id === gameState.alienCapitalId;
+
+        if (isAlienCapital) {
+            currentActions.innerHTML = `<button id="fightQueenButton" class="btn-primary" style="background:#cc4400;border-color:#cc4400;">Fight the Alien Queen</button>`;
+            document.getElementById('fightQueenButton').onclick = () => GameController.fightAlienQueen();
+            return;
+        }
+
         currentActions.innerHTML = `<button id="showSystemButton" class="btn-primary">Show System</button>`;
         this.setupCurrentSystemButtons(gameState);
     }
@@ -746,7 +766,11 @@ class UISystem {
             }
 
             let actionsHtml = '';
-            if (isPlayerTurn && activeTurnShip && activeTurnShip.alive) {
+            if (isPlayerTurn && activeTurnShip && activeTurnShip.isDrone) {
+                actionsHtml = `<p style="color:#ffaa44;font-size:0.85em;text-align:center;margin-top:0.5em;">Drone acting...</p>`;
+            } else if (isPlayerTurn && activeTurnShip && (activeTurnShip.berserkTurns || 0) > 0) {
+                actionsHtml = `<p style="color:#ff88ff;font-size:0.85em;text-align:center;margin-top:0.5em;">Berserk — out of control! (${activeTurnShip.berserkTurns}t remaining)</p>`;
+            } else if (isPlayerTurn && activeTurnShip && activeTurnShip.alive) {
                 const hasActions  = activeTurnShip.actionsRemaining > 0;
                 const mode        = combat.playerMode;
                 const isAnimating = combat.isAnimating();
@@ -783,12 +807,12 @@ class UISystem {
                             <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
                         </div>
                         <p style="color:#ff8800;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere to afterburner-dash forward at full range · damages enemies in path</p>`;
-                } else if (!isAnimating && mode === 'warhead') {
+                } else if (!isAnimating && mode === 'bomb') {
                     actionsHtml = `
                         <div class="combat-action-row">
                             <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
                         </div>
-                        <p style="color:#ff4444;font-size:0.8em;margin-top:0.5em;text-align:center;">Click within the red targeting circle to set detonation point · blast damages + knocks back all ships in radius</p>`;
+                        <p style="color:#ff8844;font-size:0.8em;margin-top:0.5em;text-align:center;">Click within the targeting circle to plant a bomb — detonates after 2 turns, blasting all ships in radius</p>`;
                 } else if (!isAnimating && mode === 'tractor_beam') {
                     actionsHtml = `
                         <div class="combat-action-row">
@@ -800,24 +824,51 @@ class UISystem {
                         <div class="combat-action-row">
                             <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
                         </div>
-                        <p style="color:#ffee44;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere to fire EMP — damages shields and locks abilities on all ships in the yellow radius</p>`;
-                } else if (!isAnimating && mode === 'detonate') {
-                    actionsHtml = `
-                        <div class="combat-action-row">
-                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
-                        </div>
-                        <p style="color:#ff6600;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere to detonate — blast damages all ships in radius</p>`;
+                        <p style="color:#44eeff;font-size:0.8em;margin-top:0.5em;text-align:center;">Click within the targeting circle to fire EMP — damages shields and locks abilities on all ships in the blast radius</p>`;
                 } else if (!isAnimating && mode === 'repair_beam') {
                     actionsHtml = `
                         <div class="combat-action-row">
                             <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                            <button id="combatConfirmRepairBtn" class="btn-primary">Repair</button>
                         </div>
-                        <p style="color:#00ff88;font-size:0.8em;margin-top:0.5em;text-align:center;">Click an allied ship in the green range circle to repair it</p>`;
+                        <p style="color:#00ff88;font-size:0.8em;margin-top:0.5em;text-align:center;">Repair beam fires in the forward green cone — restores hull on all allies in range. Click anywhere or Repair to confirm.</p>`;
+                } else if (!isAnimating && mode === 'supercharge') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ffdd00;font-size:0.8em;margin-top:0.5em;text-align:center;">Click an allied ship in the yellow forward cone to supercharge them — restores shields and gives 2× stats for 1 turn</p>`;
+                } else if (!isAnimating && mode === 'flash') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ffff44;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere within the yellow circle — flash blinds all ships in the blast radius for 2 turns</p>`;
+                } else if (!isAnimating && mode === 'hack') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ff44ff;font-size:0.8em;margin-top:0.5em;text-align:center;">Click any ship within the magenta circle to hack — target goes berserk for 2 turns, attacking friend and foe alike</p>`;
+                } else if (!isAnimating && mode === 'mark') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ff8800;font-size:0.8em;margin-top:0.5em;text-align:center;">Click any ship in the orange cone to mark it — all laser shots auto-hit for 3 turns</p>`;
+                } else if (!isAnimating && mode === 'debris_field') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                            <button id="combatConfirmDebrisBtn" class="btn-primary">Launch</button>
+                        </div>
+                        <p style="color:#cc8844;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere or Launch to hurl 3–5 rocks in the forward cone</p>`;
                 } else {
                     const overheated = activeTurnShip.statusEffect === 'plasma';
+                    const blinded    = (activeTurnShip.blindedTurns || 0) > 0;
                     const hasStatus  = !!activeTurnShip.statusEffect;
                     const dis     = !hasActions || isAnimating ? 'disabled' : '';
-                    const fireDis = !hasActions || !hasValidTargets || isAnimating || overheated ? 'disabled' : '';
+                    const fireDis = !hasActions || !hasValidTargets || isAnimating || overheated || blinded ? 'disabled' : '';
 
                     // Special move buttons — one per move the ship has
                     const cooldowns = activeTurnShip.specialMoveCooldowns || {};
@@ -826,10 +877,11 @@ class UISystem {
                         if (!moveDef) return '';
                         const cd = cooldowns[moveId] || 0;
                         const onCd  = cd > 0;
-                        const cloakBlocked = moveId === 'cloak' && hasStatus;
-                        const btnDis = onCd || !hasActions || isAnimating || overheated || cloakBlocked ? 'disabled' : '';
+                        const cloakBlocked  = moveId === 'cloak'  && hasStatus;
+                        const flashBlocked  = moveId === 'flash'  && blinded;
+                        const btnDis = onCd || !hasActions || isAnimating || overheated || cloakBlocked || flashBlocked ? 'disabled' : '';
                         const label  = onCd ? `${moveDef.name} (${cd})` : moveDef.name;
-                        const color  = onCd || overheated || cloakBlocked ? '#555' : '#cc99ff';
+                        const color  = onCd || overheated || cloakBlocked || flashBlocked ? '#555' : '#cc99ff';
                         return `<button class="btn-primary combat-special-btn" ${btnDis} data-move-id="${moveId}" style="color:${color};">${label}</button>`;
                     }).join('');
 
@@ -903,14 +955,29 @@ class UISystem {
             };
         }
 
+        const confirmRepairBtn = document.getElementById('combatConfirmRepairBtn');
+        if (confirmRepairBtn) {
+            confirmRepairBtn.onclick = () => {
+                if (activeTurnShip && activeTurnShip.alive && activeTurnShip.actionsRemaining > 0) {
+                    combat.playerRepairBeam(activeTurnShip);
+                }
+            };
+        }
+
+        const confirmDebrisBtn = document.getElementById('combatConfirmDebrisBtn');
+        if (confirmDebrisBtn) {
+            confirmDebrisBtn.onclick = () => {
+                if (activeTurnShip && activeTurnShip.alive && activeTurnShip.actionsRemaining > 0) {
+                    combat.playerDebrisField(activeTurnShip);
+                }
+            };
+        }
+
         document.querySelectorAll('.combat-special-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const moveId = btn.dataset.moveId;
                 const activeShip = combat.playerShips[combat.currentShipIndex];
-                if (moveId === 'emp_blast') {
-                    combat.playerMode = 'emp_blast';
-                    this.updateCombatScreen(gameState, combat);
-                } else if (moveId === 'cloak') {
+                if (moveId === 'cloak') {
                     if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
                         combat.playerCloak(activeShip);
                     }
@@ -918,12 +985,6 @@ class UISystem {
                     if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
                         combat.playerSummonDrone(activeShip);
                     }
-                } else if (moveId === 'detonate') {
-                    combat.playerMode = 'detonate';
-                    this.updateCombatScreen(gameState, combat);
-                } else if (moveId === 'repair_beam') {
-                    combat.playerMode = 'repair_beam';
-                    this.updateCombatScreen(gameState, combat);
                 } else {
                     combat.playerMode = moveId;
                     this.updateCombatScreen(gameState, combat);

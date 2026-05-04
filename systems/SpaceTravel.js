@@ -449,7 +449,10 @@ class SpaceTravel {
     }
 
     static initializeStartingSystem(systems) {
-        const startingSystem = systems[0];
+        const deadEnds = systems.filter(s => (s.connections || []).length === 1);
+        const startingSystem = deadEnds.length > 0
+            ? deadEnds[Math.floor(Math.random() * deadEnds.length)]
+            : systems[0];
         startingSystem.visited = true;
         this.revealAdjacentSystems(startingSystem, systems);
         return startingSystem;
@@ -497,7 +500,7 @@ class SpaceTravel {
                     seen.add(key);
                     const count = randomInt(0, CONSTANTS.FLEET_MAX_PER_ROUTE);
                     if (count > 0) {
-                        fleets.set(key, this.generateEncountersForRoute(count));
+                        fleets.set(key, this.generateEncountersForRoute(count, sys.id, connId));
                     }
                 }
             });
@@ -507,17 +510,22 @@ class SpaceTravel {
     }
 
     // Returns an array of encounter objects spread along a route.
-    static generateEncountersForRoute(count) {
-        const factionIds = CONSTANTS.FACTIONS.map(f => f.id);
+    // fromId/toId define the canonical direction for position (0=at fromId, 1=at toId).
+    static generateEncountersForRoute(count, fromId, toId) {
+        const factionIds = CONSTANTS.FACTIONS.filter(f => f.routeSpawn !== false).map(f => f.id);
         const span = 0.70; // occupies [0.15, 0.85] of the route
         const step = span / count;
         const encounters = [];
         for (let i = 0; i < count; i++) {
             const basePos = 0.15 + step * i + step * 0.1 + Math.random() * step * 0.8;
+            // Random travel direction — half go fromId→toId, half go toId→fromId
+            const forward = Math.random() < 0.5;
             encounters.push({
                 position: Math.min(0.85, Math.max(0.15, basePos)),
                 faction: factionIds[Math.floor(Math.random() * factionIds.length)],
                 size: randomInt(CONSTANTS.FLEET_SIZE_MIN, CONSTANTS.FLEET_SIZE_MAX),
+                fromId: forward ? fromId : toId,
+                toId:   forward ? toId   : fromId,
             });
         }
         return encounters;

@@ -33,6 +33,8 @@ class GalaxyRenderer {
         this.minZoom = CONSTANTS.GALAXY_MIN_ZOOM;
         this.maxZoom = CONSTANTS.GALAXY_MAX_ZOOM;
         
+        this._loopRunning = false;
+
         this._stars = Array.from({ length: 200 }, () => ({
             x: Math.random(), y: Math.random(),
             b: Math.floor(180 + Math.random() * 76)
@@ -221,17 +223,23 @@ class GalaxyRenderer {
         }
     }
     
-    // Start a travel animation from fromSystem to toSystem. Does not start moving yet.
-    startTravelAnim(fromSystem, toSystem) {
-        this._travelAnim = { from: fromSystem, to: toSystem, progress: 0 };
+    // Start a travel animation from fromSystem to toSystem. avgEngine drives transit speed.
+    startTravelAnim(fromSystem, toSystem, avgEngine = 10) {
+        this._travelAnim = { from: fromSystem, to: toSystem, progress: 0, avgEngine };
     }
 
     // Animate from current progress to endPct then call onDone.
+    // Duration is proportional to galaxy-space distance so visual speed is constant.
     animateTravelSegment(endPct, onDone) {
         if (!this._travelAnim) { onDone(); return; }
         const startPct = this._travelAnim.progress;
         if (startPct >= endPct) { onDone(); return; }
-        const segDur = Math.max(80, (endPct - startPct) * CONSTANTS.GALAXY_TRAVEL_ANIM_DURATION);
+        const routeLen = distance(
+            this._travelAnim.from.x, this._travelAnim.from.y,
+            this._travelAnim.to.x,   this._travelAnim.to.y
+        );
+        const speed  = (this._travelAnim.avgEngine || 10) * CONSTANTS.GALAXY_TRAVEL_SPEED_FACTOR;
+        const segDur = Math.max(80, ((endPct - startPct) * routeLen) / speed);
         const start = performance.now();
         const tick = (now) => {
             if (!this._travelAnim) return;
@@ -264,6 +272,53 @@ class GalaxyRenderer {
         this.ctx.translate(sx, sy);
         this.ctx.rotate(angle);
         this.ctx.fillStyle = '#00ff88';
+        drawShipShape(this.ctx, verts, S);
+        this.ctx.fill();
+        this.ctx.restore();
+    }
+
+    startLoop() {
+        if (this._loopRunning) return;
+        this._loopRunning = true;
+        const tick = () => {
+            if (!this._loopRunning || typeof gameState === 'undefined' || gameState.state !== GAME_STATE.GALAXY) {
+                this._loopRunning = false;
+                return;
+            }
+            if (gameState.systems && gameState.currentSystem) {
+                this.render(gameState.systems, gameState.currentSystem);
+            }
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }
+
+    drawStationaryShip(system) {
+        const leaderShip = typeof gameState !== 'undefined'
+            ? gameState.playerShips.find(s => s.alive)
+            : null;
+        const typeData = leaderShip
+            ? CONSTANTS.SHIP_TYPES.find(t => t.type === leaderShip.shipType)
+            : null;
+        const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
+
+        const zx = this.scaleX * this.zoom;
+        const zy = this.scaleY * this.zoom;
+        const cx = this.translateX + system.x * zx;
+        const cy = this.translateY + system.y * zy;
+        const S = 8 * (typeData?.sizeMult ?? 1.0);
+        const orbitR = CONSTANTS.GALAXY_SYSTEM_RADIUS + S + 3;
+        // one full revolution every 2 seconds
+        const orbitAngle = (Date.now() / 2000) * Math.PI * 2;
+        const sx = cx + orbitR * Math.cos(orbitAngle);
+        const sy = cy + orbitR * Math.sin(orbitAngle);
+        // tangent to the orbit circle — ship always points in direction of travel
+        const shipAngle = orbitAngle + Math.PI / 2;
+
+        this.ctx.save();
+        this.ctx.translate(sx, sy);
+        this.ctx.rotate(shipAngle);
+        this.ctx.fillStyle = '#cccccc';
         drawShipShape(this.ctx, verts, S);
         this.ctx.fill();
         this.ctx.restore();
@@ -450,9 +505,11 @@ class GalaxyRenderer {
             this.drawSystem(system, isReachable, isHovered, isSelected, isCurrent, isTransitOrigin);
         });
         
-        // Draw traveling ship on top of everything
+        // Draw player ship — traveling or stationary at current system
         if (this._travelAnim) {
             this.drawTravelingShip(this._travelAnim.from, this._travelAnim.to, this._travelAnim.progress);
+        } else if (currentSystem) {
+            this.drawStationaryShip(currentSystem);
         }
 
         // Draw tooltip
@@ -491,28 +548,59 @@ class GalaxyRenderer {
                         const otherSystem = systems.find(s => s.id === connId);
                         if (otherSystem) {
                             if (system.seen && otherSystem.seen) {
-                                this.drawConnectionLine(system, otherSystem, '#808080');
+                                const isAlienRoute = typeof gameState !== 'undefined' && gameState.alienRoutes && gameState.alienRoutes.has(pairKey);
+                                this.drawConnectionLine(system, otherSystem, isAlienRoute ? '#cc5500' : '#808080');
                                 if (typeof gameState !== 'undefined' && gameState.routeFleets && gameState.routeFleets.has(pairKey)) {
-                                    const zx = this.scaleX * this.zoom;
-                                    const zy = this.scaleY * this.zoom;
-                                    const routeAngle = Math.atan2(otherSystem.y - system.y, otherSystem.x - system.x);
-                                    const encounters = gameState.routeFleets.get(pairKey);
-                                    for (const enc of encounters) {
-                                        const t = enc.position;
-                                        const ex = system.x + (otherSystem.x - system.x) * t;
-                                        const ey = system.y + (otherSystem.y - system.y) * t;
-                                        const factionData = CONSTANTS.FACTIONS.find(f => f.id === enc.faction);
-                                        this.routeFleetDots.push({
-                                            dotId: `${pairKey}|${enc.faction}|${t.toFixed(4)}`,
-                                            key: pairKey,
-                                            faction: enc.faction,
-                                            factionName: factionData ? factionData.name : 'Unknown',
-                                            color: factionData ? factionData.color : '#ff4444',
-                                            x: this.translateX + ex * zx,
-                                            y: this.translateY + ey * zy,
-                                            size: enc.size,
-                                            angle: routeAngle,
+                                    const currentId = gameState.currentSystem ? gameState.currentSystem.id : null;
+                                    const adjIds    = new Set(gameState.currentSystem ? gameState.currentSystem.connections : []);
+                                    // 2-hop set: connections of connections not already in adjIds or current
+                                    const twoHopIds = new Set();
+                                    for (const adjId of adjIds) {
+                                        const adjSys = gameState.systems.find(s => s.id === adjId);
+                                        if (adjSys) adjSys.connections.forEach(id => {
+                                            if (id !== currentId && !adjIds.has(id)) twoHopIds.add(id);
                                         });
+                                    }
+                                    const isDirect  = system.id === currentId || otherSystem.id === currentId;
+                                    const isOneHop  = !isDirect && (adjIds.has(system.id) || adjIds.has(otherSystem.id));
+                                    const isTwoHop  = !isDirect && !isOneHop && (twoHopIds.has(system.id) || twoHopIds.has(otherSystem.id));
+                                    if (!isDirect && !isOneHop && !isTwoHop) {
+                                        // Beyond sensor range — skip fleet dots
+                                    } else {
+                                        const zx = this.scaleX * this.zoom;
+                                        const zy = this.scaleY * this.zoom;
+                                        const routeAngle = Math.atan2(otherSystem.y - system.y, otherSystem.x - system.x);
+                                        // Interpolate fleet positions during player transit so they visually
+                                        // advance at the same rate advanceFleets() will commit on arrival.
+                                        const animOffset = this._travelAnim ? this._travelAnim.progress * 0.30 : 0;
+                                        const encounters = gameState.routeFleets.get(pairKey);
+                                        for (const enc of encounters) {
+                                            const rawPos = enc.position + animOffset;
+                                            if (rawPos >= 1) continue; // arrived, will reappear after advanceFleets
+                                            // Direction-aware position in the rendering frame (system→otherSystem).
+                                            const t = enc.fromId !== undefined
+                                                ? (enc.fromId === system.id ? rawPos : 1 - rawPos)
+                                                : rawPos;
+                                            // Fleet faces its travel direction, not just the route direction.
+                                            const fleetAngle = (enc.fromId !== undefined && enc.fromId !== system.id)
+                                                ? routeAngle + Math.PI
+                                                : routeAngle;
+                                            const ex = system.x + (otherSystem.x - system.x) * t;
+                                            const ey = system.y + (otherSystem.y - system.y) * t;
+                                            const factionData = CONSTANTS.FACTIONS.find(f => f.id === enc.faction);
+                                            this.routeFleetDots.push({
+                                                dotId: `${pairKey}|${enc.faction}|${enc.position.toFixed(4)}`,
+                                                key: pairKey,
+                                                faction: enc.faction,
+                                                factionName: factionData ? factionData.name : 'Unknown',
+                                                color: factionData ? factionData.color : '#ff4444',
+                                                x: this.translateX + ex * zx,
+                                                y: this.translateY + ey * zy,
+                                                size: enc.size,
+                                                angle: fleetAngle,
+                                                isUnknown: !isDirect,
+                                            });
+                                        }
                                     }
                                 }
                             } else if (system.seen || otherSystem.seen) {
@@ -535,7 +623,18 @@ class GalaxyRenderer {
             const isHovered  = this.hoveredRouteFleet && this.hoveredRouteFleet.dotId === dot.dotId;
             const S          = isHovered ? 10 : 7;
             const baseColor  = dot.color || '#ff4444';
-            const labelColor = isHovered ? '#ffffff' : baseColor;
+
+            if (dot.isUnknown) {
+                // Non-direct route (1+ hops from player): render a "?" in muted gray, no size label
+                this.ctx.save();
+                this.ctx.font = `bold ${isHovered ? 15 : 12}px Courier New`;
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillStyle = isHovered ? '#cccccc' : '#666666';
+                this.ctx.fillText('?', dot.x, dot.y);
+                this.ctx.restore();
+                continue;
+            }
 
             this.ctx.save();
             this.ctx.translate(dot.x, dot.y);
@@ -562,13 +661,13 @@ class GalaxyRenderer {
 
             this.ctx.restore();
 
-            // Fleet size number above the dot
-            const fontSize = isHovered ? 11 : 9;
+            // Fleet size number — larger font, higher above the icon
+            const fontSize = isHovered ? 14 : 12;
             this.ctx.font = `bold ${fontSize}px Courier New`;
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'bottom';
-            this.ctx.fillStyle = labelColor;
-            this.ctx.fillText(String(dot.size), dot.x, dot.y - S - 1);
+            this.ctx.fillStyle = isHovered ? '#ffffff' : baseColor;
+            this.ctx.fillText(String(dot.size), dot.x, dot.y - S - 8);
             this.ctx.textAlign = 'left';
             this.ctx.textBaseline = 'alphabetic';
         }
@@ -587,7 +686,9 @@ class GalaxyRenderer {
     updateRouteFleetTooltip(fleet) {
         const tooltip = document.getElementById('systemTooltip');
         if (!tooltip) return;
-        tooltip.innerHTML = `<strong>${fleet.factionName} Fleet</strong><br>Ships: ${fleet.size}`;
+        tooltip.innerHTML = fleet.isUnknown
+            ? `<strong>Unknown Fleet</strong><br>Out of sensor range`
+            : `<strong>${fleet.factionName} Fleet</strong><br>Ships: ${fleet.size}`;
         tooltip.style.left = (this.mouseX + 10) + 'px';
         tooltip.style.top  = (this.mouseY + 10) + 'px';
         tooltip.style.display = 'block';
@@ -603,7 +704,9 @@ class GalaxyRenderer {
         currentSystem.connections.forEach(connId => {
             const otherSystem = systems.find(s => s.id === connId);
             if (otherSystem) {
-                this.drawConnectionLine(currentSystem, otherSystem, '#c0c0c0');
+                const rk = getRouteKey(currentSystem.id, connId);
+                const isAlienRoute = typeof gameState !== 'undefined' && gameState.alienRoutes && gameState.alienRoutes.has(rk);
+                this.drawConnectionLine(currentSystem, otherSystem, isAlienRoute ? '#ff8800' : '#c0c0c0');
             }
         });
     }
@@ -745,7 +848,16 @@ class GalaxyRenderer {
             this.ctx.arc(x, y, fixedRadius + 3, 0, Math.PI * 2);
             this.ctx.stroke();
         }
-        
+
+        // Mark alien capital with a pulsing orange ring
+        if (typeof gameState !== 'undefined' && gameState.alienCapitalId === system.id) {
+            const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 400);
+            this.ctx.strokeStyle = `rgba(255, 136, 0, ${pulse})`;
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, fixedRadius + 7, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
     }
     
     updateTooltip(system, currentSystem) {
