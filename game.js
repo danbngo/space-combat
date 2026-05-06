@@ -4,8 +4,8 @@
  * @typedef {{
  *   state: string,
  *   credits: number,
- *   systems: Array<{id:number, name:string, x:number, y:number, visited:boolean, resourceLevel:number, connections:number[]}>,
- *   routeFleets: Map<string, Array>,
+ *   systems: Array<{id:number, name:string, tier:number, x:number, y:number, visited:boolean, connections:number[], parentId:number|null, isQueenPlanet:boolean, hasRepair:boolean, hasShipyard:boolean, hasMechanic:boolean, hasCourthouse:boolean}>,
+ *   routes: Map<string, object>,
  *   bounty: number,
  *   currentSystem: object,
  *   selectedSystem: object|null,
@@ -26,6 +26,9 @@ let _travelContinuation = null;
 // Info about the encounter currently being fought — used to respawn the fleet on player victory.
 let _defeatedEncounterInfo = null;
 
+// State needed to re-show the travel screen after returning from combat.
+let _travelScreenState = null;
+
 const GameController = {
     init: function() {
         this.initializeGameState();
@@ -40,37 +43,22 @@ const GameController = {
             destroyer:    'images/destroyer.png',
             drone:        'images/drone.png',
             fighter:      'images/fighter.png',
-            freighter:    'images/tanker.png',
+            carrier:      'images/carrier.png',
+            freighter:    'images/freighter.png',
+            interceptor:  'images/interceptor.png',
             jammer:       'images/jammer.png',
             repair_ship:  'images/repair_ship.png',
+            scout:        'images/scout.png',
             smuggler:     'images/smuggler.png',
+            raider:       'images/raider.png',
+            hijacker:     'images/hijacker.png',
+            amplifier:    'images/amplifier.png',
         });
     },
     
     initializeGameState: function() {
-        const systems = SpaceTravel.generateUniverse();
+        const { systems, routes } = SpaceTravel.generateTree();
         const startingSystem = SpaceTravel.initializeStartingSystem(systems);
-        const routeFleets = SpaceTravel.generateRouteFleets(systems);
-
-        // Count total routes for loss condition
-        let totalRoutes = 0;
-        systems.forEach(sys => {
-            sys.connections.forEach(connId => { if (connId > sys.id) totalRoutes++; });
-        });
-
-        // Find alien capital (≥10 hops from player start)
-        const alienCapitalId = this.findAlienCapital(systems, startingSystem);
-
-        // Seed alien-controlled routes adjacent to the capital
-        const alienRoutes = new Set();
-        if (alienCapitalId !== null) {
-            const capitalSys = systems.find(s => s.id === alienCapitalId);
-            if (capitalSys) {
-                capitalSys.connections.forEach(connId => {
-                    alienRoutes.add(getRouteKey(alienCapitalId, connId));
-                });
-            }
-        }
 
         gameState = {
             state: GAME_STATE.TITLE,
@@ -78,123 +66,21 @@ const GameController = {
             bounty: 0,
             fame: 0,
             day: 1,
-            systems: systems,
-            routeFleets: routeFleets,
-            alienRoutes: alienRoutes,
-            alienCapitalId: alienCapitalId,
-            totalRoutes: totalRoutes,
+            systems,
+            routes,
             currentSystem: startingSystem,
             selectedSystem: startingSystem,
             selectedShip: null,
             playerShips: [],
-            enemyShips: []
+            enemyShips: [],
         };
 
-        // Initialize player starting fleet
         for (let i = 0; i < CONSTANTS.PLAYER_STARTING_SHIPS; i++) {
             const s = new Ship(0, 0, true);
             s._buyPrice = CONSTANTS.NEW_SHIP_BASE_COST;
             gameState.playerShips.push(s);
         }
         assignFleetNames(gameState.playerShips);
-    },
-    
-    findAlienCapital: function(systems, startingSystem) {
-        const dist = new Map();
-        dist.set(startingSystem.id, 0);
-        const queue = [startingSystem.id];
-        while (queue.length > 0) {
-            const cur = queue.shift();
-            const sys = systems.find(s => s.id === cur);
-            if (!sys) continue;
-            for (const nid of sys.connections) {
-                if (!dist.has(nid)) {
-                    dist.set(nid, dist.get(cur) + 1);
-                    queue.push(nid);
-                }
-            }
-        }
-        const farSystems = systems.filter(s => (dist.get(s.id) || 0) >= 10 && s.connections.length > 0);
-        if (farSystems.length > 0) {
-            return farSystems[Math.floor(Math.random() * farSystems.length)].id;
-        }
-        // Fallback: pick the farthest system
-        let maxDist = 0, maxId = null;
-        for (const [id, d] of dist) {
-            if (d > maxDist) { maxDist = d; maxId = id; }
-        }
-        return maxId;
-    },
-
-    advanceAlienSpawns: function(daysElapsed) {
-        if (!gameState.alienRoutes || gameState.alienCapitalId === null) return;
-        // Spawn chance per day: 0% on day 1, +1% per day, max 10%
-        const spawnChancePerDay = Math.min(0.10, Math.max(0, (gameState.day - 1) / 100));
-        if (spawnChancePerDay <= 0) return;
-        // Cumulative probability over daysElapsed
-        const spawnChance = 1 - Math.pow(1 - spawnChancePerDay, daysElapsed);
-
-        // Collect all systems bordering alien territory
-        const alienSystems = new Set();
-        for (const key of gameState.alienRoutes) {
-            const [a, b] = key.split('-').map(Number);
-            alienSystems.add(a);
-            alienSystems.add(b);
-        }
-
-        // Find adjacent unoccupied routes
-        const candidateSet = new Set();
-        for (const sysId of alienSystems) {
-            const sys = gameState.systems.find(s => s.id === sysId);
-            if (!sys) continue;
-            for (const connId of sys.connections) {
-                const key = getRouteKey(sysId, connId);
-                if (!gameState.alienRoutes.has(key)) candidateSet.add(key);
-            }
-        }
-
-        for (const key of candidateSet) {
-            if (Math.random() < spawnChance) gameState.alienRoutes.add(key);
-        }
-    },
-
-    fightAlienQueen: function() {
-        const alienColor = '#ff8800';
-        const queenFleet = [];
-        const queenShip = SpaceTravel.generateShipOfType('Alien Queen');
-        queenShip.factionColor = alienColor;
-        queenFleet.push(queenShip);
-        ['Alien Phantom', 'Alien Ravager', 'Alien Titan', 'Alien Stalker'].forEach(type => {
-            const s = SpaceTravel.generateShipOfType(type);
-            s.factionColor = alienColor;
-            queenFleet.push(s);
-        });
-        assignFleetNames(queenFleet);
-        gameState.enemyShips = queenFleet;
-        _defeatedEncounterInfo = { faction: 'aliens', size: queenFleet.length, fameDelta: 0, isQueenFight: true };
-        _travelContinuation = null;
-        this.startCombat({ enemyFirst: false });
-    },
-
-    showAlienNewsModal: function(totalAlienRoutes, newRoutes) {
-        const bodyEl    = document.getElementById('alienNewsBody');
-        const modal     = document.getElementById('alienNewsModal');
-        const dismissBtn = document.getElementById('alienNewsDismissBtn');
-        const pct = Math.round((totalAlienRoutes / gameState.totalRoutes) * 100);
-        const urgency = pct >= 50
-            ? `<p style="color:#ff4444;font-weight:bold;">The aliens now control more than half the galaxy's routes!</p>`
-            : '';
-        bodyEl.innerHTML = `
-            <p>Alien forces have expanded, claiming <strong>${newRoutes}</strong> new ${newRoutes === 1 ? 'route' : 'routes'}.</p>
-            <p>They now control <strong>${totalAlienRoutes}</strong> of <strong>${gameState.totalRoutes}</strong> routes (${pct}%).</p>
-            ${urgency}
-            <p style="color:#ff8800;font-size:0.85em;">Destroy the Alien Queen at the alien capital to end their expansion.</p>`;
-        dismissBtn.onclick = () => {
-            modal.style.display = 'none';
-            UISystem.showScreen('galaxyScreen');
-            UISystem.updateGalaxyScreen(gameState);
-        };
-        modal.style.display = 'flex';
     },
 
     setupEventListeners: function() {
@@ -305,6 +191,7 @@ const GameController = {
             combat = null;
             _travelContinuation = null;
             _defeatedEncounterInfo = null;
+            _travelScreenState = null;
             if (galaxyRenderer) galaxyRenderer._travelAnim = null;
             document.getElementById('gameOverButton').textContent = 'Start New Game';
             this.initializeGameState();
@@ -331,164 +218,44 @@ const GameController = {
     
     travelToSystem: function(targetSystem) {
         const fromSystem = gameState.currentSystem;
-        const routeKey = getRouteKey(fromSystem.id, targetSystem.id);
 
-        // Compute the player-progress value t at which the player's ship meets each fleet,
-        // accounting for fleet movement during transit (fleets move 0.30 per full player trip).
-        const FLEET_STEP = 0.30;
-        const encounters = [];
-        for (const enc of (gameState.routeFleets.get(routeKey) || [])) {
-            if (enc.fromId === undefined) continue; // skip legacy direction-less encounters
-            const sameDir = enc.fromId === fromSystem.id;
-            // Same dir: player at t, fleet at enc.position + t*FLEET_STEP → meet at enc.position / (1 - FLEET_STEP)
-            // Opp dir:  player at t, fleet at (1-enc.position) - t*FLEET_STEP → meet at (1-enc.position) / (1 + FLEET_STEP)
-            const crossT = sameDir
-                ? enc.position / (1 - FLEET_STEP)
-                : (1 - enc.position) / (1 + FLEET_STEP);
-            if (crossT > 0 && crossT <= 1) {
-                encounters.push({ ...enc, _crossT: crossT, _original: enc });
-            }
-        }
-        // If this route is alien-controlled, add an alien encounter
-        if (gameState.alienRoutes && gameState.alienRoutes.has(routeKey)) {
-            encounters.push({
-                faction: 'aliens',
-                size: randomInt(2, 4),
-                _crossT: 0.4 + Math.random() * 0.2,
-                isAlien: true,
-                fromId: fromSystem.id,
-                toId: targetSystem.id,
-            });
-        }
-        encounters.sort((a, b) => a._crossT - b._crossT);
+        // Guard: only allow travel to direct children (no backtracking)
+        if (!fromSystem.connections.includes(targetSystem.id)) return;
+
+        const routeKey   = getRouteKey(fromSystem.id, targetSystem.id);
+        const routeData  = gameState.routes ? gameState.routes.get(routeKey) : null;
+        const encounters = routeData ? SpaceTravel.rollEncountersForRoute(routeData) : [];
+
+        const alive     = gameState.playerShips.filter(s => s.alive);
+        const avgEngine = alive.length > 0 ? alive.reduce((sum, s) => sum + s.engine, 0) / alive.length : 10;
 
         const arrive = () => {
             if (galaxyRenderer) galaxyRenderer._travelAnim = null;
-            const routeDist = distance(fromSystem.x, fromSystem.y, targetSystem.x, targetSystem.y);
+            _travelScreenState = null;
+            const routeDist   = distance(fromSystem.x, fromSystem.y, targetSystem.x, targetSystem.y);
             const daysElapsed = routeDist / avgEngine / CONSTANTS.TRAVEL_TIME_SCALE;
             gameState.day = (gameState.day || 1) + daysElapsed;
             if (gameState.bounty > 0) {
                 gameState.bounty = Math.floor(gameState.bounty * Math.pow(0.95, daysElapsed));
             }
 
-            // Advance alien expansion
-            const alienCountBefore = (gameState.alienRoutes || new Set()).size;
-            this.advanceAlienSpawns(daysElapsed);
-            const alienCountAfter = (gameState.alienRoutes || new Set()).size;
-
             SpaceTravel.travelToSystem(fromSystem, targetSystem);
-            SpaceTravel.revealAdjacentSystems(targetSystem, gameState.systems);
-            gameState.currentSystem = targetSystem;
+            SpaceTravel.revealFromTier(gameState.systems, targetSystem.tier);
+            gameState.currentSystem  = targetSystem;
             gameState.selectedSystem = targetSystem;
-            this.advanceFleets();
 
-            // Loss: aliens conquered all routes
-            if (gameState.alienRoutes && gameState.totalRoutes && gameState.alienRoutes.size >= gameState.totalRoutes) {
-                document.getElementById('gameOverTitle').textContent = 'Defeat';
-                document.getElementById('gameOverTitle').style.color = '#ff4444';
-                document.getElementById('gameOverMessage').textContent = 'Alien forces have conquered all trade routes. The galaxy has fallen.';
-                document.getElementById('gameOverButton').textContent = 'Start New Game';
-                gameState.state = GAME_STATE.GAME_OVER;
-                UISystem.showScreen('gameOverScreen');
-                return;
-            }
-
-            // Show alien news if expansion occurred, otherwise go straight to galaxy
-            if (alienCountAfter > alienCountBefore) {
-                this.showAlienNewsModal(alienCountAfter, alienCountAfter - alienCountBefore);
-            } else {
-                UISystem.showScreen('galaxyScreen');
-                UISystem.updateGalaxyScreen(gameState);
-            }
+            gameState.state = GAME_STATE.GALAXY;
+            UISystem.showScreen('galaxyScreen');
+            UISystem.updateGalaxyScreen(gameState);
         };
 
-        const alive = gameState.playerShips.filter(s => s.alive);
-        const avgEngine = alive.length > 0 ? alive.reduce((sum, s) => sum + s.engine, 0) / alive.length : 10;
+        // Switch to travel screen
+        gameState.state = GAME_STATE.TRAVEL;
+        _travelScreenState = { from: fromSystem, to: targetSystem, routeData, encounters };
+        UISystem.showTravelScreen(gameState, fromSystem, targetSystem, routeData, encounters);
+
         if (galaxyRenderer) galaxyRenderer.startTravelAnim(fromSystem, targetSystem, avgEngine);
         this.processEncounters(fromSystem, targetSystem, routeKey, encounters, 0, arrive);
-    },
-
-    // Advance all fleet positions by one travel tick; fleets that arrive at a system
-    // immediately pick a new destination and continue from the start of that route.
-    advanceFleets: function() {
-        const STEP = 0.30;
-        const toAdd = []; // fleets that moved to a new route
-
-        for (const [key, encounters] of gameState.routeFleets) {
-            const remaining = [];
-            for (const enc of encounters) {
-                if (enc.fromId === undefined) { remaining.push(enc); continue; }
-                enc.position += STEP;
-                if (enc.position >= 1) {
-                    // Fleet arrived at toId — pick a new destination (prefer not to backtrack, avoid alien routes)
-                    const arrivedSys = gameState.systems.find(s => s.id === enc.toId);
-                    if (arrivedSys && arrivedSys.connections.length > 0) {
-                        const alienRoutes = gameState.alienRoutes || new Set();
-                        const nonAlien = arrivedSys.connections.filter(id => !alienRoutes.has(getRouteKey(arrivedSys.id, id)));
-                        const others = nonAlien.filter(id => id !== enc.fromId);
-                        const pool = others.length > 0 ? others : (nonAlien.length > 0 ? nonAlien : []);
-                        if (pool.length === 0) continue; // stranded in alien territory — fleet dissolves
-                        const newToId = pool[Math.floor(Math.random() * pool.length)];
-                        enc.fromId    = enc.toId;
-                        enc.toId      = newToId;
-                        enc.position  = enc.position - 1; // carry over excess
-                        toAdd.push({ key: getRouteKey(enc.fromId, newToId), enc });
-                    }
-                    // If no valid system found, fleet disappears
-                } else {
-                    remaining.push(enc);
-                }
-            }
-            if (remaining.length > 0) gameState.routeFleets.set(key, remaining);
-            else gameState.routeFleets.delete(key);
-        }
-
-        for (const { key, enc } of toAdd) {
-            if (!gameState.routeFleets.has(key)) gameState.routeFleets.set(key, []);
-            gameState.routeFleets.get(key).push(enc);
-        }
-    },
-
-    respawnFleet: function(info) {
-        if (!info) return;
-        const origin = gameState.currentSystem;
-        if (!origin) return;
-
-        // BFS to find hop distances from current system
-        const dist = new Map();
-        dist.set(origin.id, 0);
-        const queue = [origin.id];
-        while (queue.length > 0) {
-            const cur = queue.shift();
-            const sys = gameState.systems.find(s => s.id === cur);
-            if (!sys) continue;
-            for (const nid of sys.connections) {
-                if (!dist.has(nid)) {
-                    dist.set(nid, dist.get(cur) + 1);
-                    queue.push(nid);
-                }
-            }
-        }
-
-        const farSystems = gameState.systems.filter(s =>
-            (dist.get(s.id) || 0) >= 5 && s.connections.length > 0
-        );
-        if (farSystems.length === 0) return;
-
-        const chosenSys = farSystems[Math.floor(Math.random() * farSystems.length)];
-        const connId    = chosenSys.connections[Math.floor(Math.random() * chosenSys.connections.length)];
-        const routeKey  = getRouteKey(chosenSys.id, connId);
-        const forward   = Math.random() < 0.5;
-        const enc = {
-            position: 0.05 + Math.random() * 0.15,
-            faction:  info.faction,
-            size:     info.size,
-            fromId:   forward ? chosenSys.id : connId,
-            toId:     forward ? connId : chosenSys.id,
-        };
-
-        if (!gameState.routeFleets.has(routeKey)) gameState.routeFleets.set(routeKey, []);
-        gameState.routeFleets.get(routeKey).push(enc);
     },
 
     processEncounters: function(fromSystem, targetSystem, routeKey, encounters, index, onArrival) {
@@ -526,19 +293,12 @@ const GameController = {
             const startCombatSoldier = (addBounty, combatOptions = {}, fameDelta = 0) => {
                 if (addBounty) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
                 removeEncounterFn();
-                _defeatedEncounterInfo = { faction: encounter.faction, size: encounter.size, fameDelta, alienRouteKey: null };
+                _defeatedEncounterInfo = { faction: encounter.faction, size: encounter.size, fameDelta, isQueenFight: false };
                 gameState.enemyShips = preGenFleetSoldier;
                 _travelContinuation = onContinue;
                 this.startCombat(combatOptions);
             };
-            const removeEncounterFn = () => {
-                const arr = gameState.routeFleets.get(routeKey);
-                if (arr) {
-                    const idx = arr.indexOf(encounter._original || encounter);
-                    if (idx !== -1) arr.splice(idx, 1);
-                    if (arr.length === 0) gameState.routeFleets.delete(routeKey);
-                }
-            };
+            const removeEncounterFn = () => {};
             const modalEl2   = document.getElementById('encounterModal');
             const titleEl2   = document.getElementById('encounterModalTitle');
             const bodyEl2    = document.getElementById('encounterModalBody');
@@ -547,6 +307,12 @@ const GameController = {
             const closeModal2 = () => { modalEl2.style.display = 'none'; retreatBtn2.style.display = ''; retreatBtn2.textContent = 'Turn Back'; };
             titleEl2.textContent = 'Soldier Patrol';
             titleEl2.style.color = '#aaaaff';
+            const soldierFaction = CONSTANTS.FACTIONS.find(f => f.id === 'soldiers');
+            if (soldierFaction && soldierFaction.description) {
+                titleEl2.setAttribute('data-tooltip-title', soldierFaction.name);
+                titleEl2.setAttribute('data-tooltip-body', soldierFaction.description);
+                titleEl2.style.cursor = 'help';
+            }
             bodyEl2.innerHTML = `<p>A soldier patrol of <strong>${encounter.size} ships</strong> scans your transponder.</p>
                 <p style="color:#00ff88;font-size:0.88em;margin-top:0.3em;">✓ Cleared to pass — your record is clean.</p>`;
             engageBtn2.textContent = 'Attack';
@@ -573,24 +339,13 @@ const GameController = {
         const enemyRadar  = preGenFleet.reduce((sum, s) => sum + s.radar, 0);
         const undetected  = playerRadar > enemyRadar;
 
-        // Remove this specific encounter from the route map before starting combat
-        const removeEncounter = () => {
-            const arr = gameState.routeFleets.get(routeKey);
-            if (arr) {
-                const idx = arr.indexOf(encounter._original || encounter);
-                if (idx !== -1) arr.splice(idx, 1);
-                if (arr.length === 0) gameState.routeFleets.delete(routeKey);
-            }
-        };
-
         const startCombatWith = (addBounty, combatOptions = {}, fameDelta = 0) => {
             if (addBounty) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
-            if (!encounter.isAlien) removeEncounter();
             _defeatedEncounterInfo = {
-                faction: encounter.faction,
-                size: encounter.size,
+                faction:      encounter.faction,
+                size:         encounter.size,
                 fameDelta,
-                alienRouteKey: encounter.isAlien ? routeKey : null,
+                isQueenFight: encounter.isQueenFight || false,
             };
             gameState.enemyShips = preGenFleet;
             _travelContinuation = onContinue;
@@ -611,19 +366,35 @@ const GameController = {
 
         titleEl.textContent = `${factionName} Fleet`;
         titleEl.style.color = factionColor;
+        if (factionData && factionData.description) {
+            titleEl.setAttribute('data-tooltip-title', factionData.name);
+            titleEl.setAttribute('data-tooltip-body', factionData.description);
+            titleEl.style.cursor = 'help';
+        } else {
+            titleEl.removeAttribute('data-tooltip-title');
+            titleEl.removeAttribute('data-tooltip-body');
+            titleEl.style.cursor = '';
+        }
 
-        // ── ALIENS: always attack, no negotiate ───────────────────────────────────
+        // ── ALIENS (including queen) — always attack, no negotiate ───────────────
         if (encounter.faction === 'aliens') {
-            titleEl.textContent = 'Alien Fleet';
             titleEl.style.color = '#ff8800';
-            bodyEl.innerHTML = `
-                <p style="color:#ff8800;">An alien fleet of <strong>${encounter.size} ships</strong> blocks your path!</p>
-                <p style="color:#aaa;font-size:0.85em;">Aliens cannot be negotiated with. Clear the route to pass.</p>`;
+            if (encounter.isQueenFight) {
+                titleEl.textContent = 'Alien Queen';
+                bodyEl.innerHTML = `
+                    <p style="color:#ff4400;font-size:1em;"><strong>The Alien Queen herself blocks your path!</strong></p>
+                    <p style="color:#aaa;font-size:0.85em;">Defeat her to end the invasion and win the war.</p>`;
+            } else {
+                titleEl.textContent = 'Alien Fleet';
+                bodyEl.innerHTML = `
+                    <p style="color:#ff8800;">An alien fleet of <strong>${encounter.size} ships</strong> blocks your path!</p>
+                    <p style="color:#aaa;font-size:0.85em;">Aliens cannot be negotiated with. Clear the route to pass.</p>`;
+            }
             engageBtn.textContent = 'Fight';
             retreatBtn.style.display = 'none';
             engageBtn.onclick = () => {
                 closeModal();
-                startCombatWith(false, { enemyFirst: true }, 3);
+                startCombatWith(false, { enemyFirst: true }, encounter.isQueenFight ? 0 : 3);
             };
             modalEl.style.display = 'flex';
             return;
@@ -685,9 +456,9 @@ const GameController = {
             const playerFame   = gameState.fame   || 0;
             let willAttack = false;
             if (encounter.faction === 'pirates') {
-                willAttack = Math.random() < CONSTANTS.FLEET_PIRATE_ATTACK_CHANCE;
+                willAttack = Math.random() < 0.5;
             } else if (encounter.faction === 'police' && playerBounty > 0) {
-                willAttack = Math.random() < CONSTANTS.FLEET_POLICE_ATTACK_CHANCE;
+                willAttack = Math.random() < 0.5;
             } else if (encounter.faction === 'soldiers' && playerFame < 0) {
                 willAttack = Math.random() < Math.min(1, -playerFame / 100);
             }
@@ -1113,11 +884,6 @@ const GameController = {
                 const fameDelta = _defeatedEncounterInfo.fameDelta || 0;
                 if (fameDelta !== 0) gameState.fame = (gameState.fame || 0) + fameDelta;
 
-                // Clear the alien route if this was an alien encounter on a route
-                if (_defeatedEncounterInfo.alienRouteKey) {
-                    gameState.alienRoutes.delete(_defeatedEncounterInfo.alienRouteKey);
-                }
-
                 // Queen fight win = game won
                 if (_defeatedEncounterInfo.isQueenFight) {
                     _defeatedEncounterInfo = null;
@@ -1134,38 +900,42 @@ const GameController = {
                 const factionDataEC = CONSTANTS.FACTIONS.find(f => f.id === _defeatedEncounterInfo.faction);
                 const creditMult = factionDataEC ? (factionDataEC.creditMult || 1) : 1;
                 gameState.credits += Math.round(rewards * creditMult);
-                // Don't respawn alien fleets
-                if (!_defeatedEncounterInfo.alienRouteKey) {
-                    this.respawnFleet(_defeatedEncounterInfo);
-                }
                 _defeatedEncounterInfo = null;
             } else {
                 gameState.credits += rewards;
             }
-            gameState.state = GAME_STATE.GALAXY;
-            UISystem.showScreen('galaxyScreen');
-            if (_travelContinuation) {
+            const hasCont = !!_travelContinuation;
+            if (hasCont && _travelScreenState) {
+                gameState.state = GAME_STATE.TRAVEL;
+                UISystem.showTravelScreen(gameState, _travelScreenState.from, _travelScreenState.to, _travelScreenState.routeData, _travelScreenState.encounters);
                 const cont = _travelContinuation;
                 _travelContinuation = null;
                 cont();
             } else {
+                gameState.state = GAME_STATE.GALAXY;
+                UISystem.showScreen('galaxyScreen');
                 UISystem.updateGalaxyScreen(gameState);
             }
         } else if (combat.lost) {
             _travelContinuation = null;
+            _travelScreenState = null;
             if (galaxyRenderer) galaxyRenderer._travelAnim = null;
             UISystem.showGameOver(false, 'All your ships were destroyed. Game Over!');
             gameState.state = GAME_STATE.GAME_OVER;
         } else if (combat.playerRetreated) {
-            // Retreated mid-travel → continue to destination (can't turn back)
-            gameState.state = GAME_STATE.GALAXY;
-            UISystem.showScreen('galaxyScreen');
-            if (_travelContinuation) {
+            // Retreated mid-travel → continue to destination
+            const hasCont = !!_travelContinuation;
+            if (hasCont && _travelScreenState) {
+                gameState.state = GAME_STATE.TRAVEL;
+                UISystem.showTravelScreen(gameState, _travelScreenState.from, _travelScreenState.to, _travelScreenState.routeData, _travelScreenState.encounters);
                 const cont = _travelContinuation;
                 _travelContinuation = null;
                 cont();
             } else {
+                _travelScreenState = null;
                 if (galaxyRenderer) galaxyRenderer._travelAnim = null;
+                gameState.state = GAME_STATE.GALAXY;
+                UISystem.showScreen('galaxyScreen');
                 UISystem.updateGalaxyScreen(gameState);
             }
         }

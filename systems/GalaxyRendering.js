@@ -10,9 +10,9 @@ class GalaxyRenderer {
         this.mouseX = 0;
         this.mouseY = 0;
         this.hoveredSystem = null;
-        this.hoveredRouteFleet = null;
-        this.routeFleetDots = [];
         this.selectedSystem = null;
+        this.hoveredRoute = null;
+        this.selectedRoute = null;
         this.isDragging = false;
         this.dragged = false;
         this.lastDragX = 0;
@@ -194,33 +194,24 @@ class GalaxyRenderer {
         const galaxyY = (this.mouseY - this.translateY) / zoomedScaleY;
 
         const oldHovered = this.hoveredSystem;
+        const oldRoute   = this.hoveredRoute;
         this.hoveredSystem = this.getSystemAtPosition(galaxyX, galaxyY);
+        this.hoveredRoute  = this.hoveredSystem ? null : this.getRouteAtPosition(galaxyX, galaxyY);
 
-        if (oldHovered && (!this.hoveredSystem || this.hoveredSystem.id !== oldHovered.id)) {
-            console.log(`[GalaxyMouse] UNHOVER: mouse(screen: ${this.mouseX.toFixed(1)}, ${this.mouseY.toFixed(1)}) canvas(${galaxyX.toFixed(1)}, ${galaxyY.toFixed(1)}) unhovered "${oldHovered.name}"`);
-            this.scheduleTooltipHide();
+        const sysChanged   = this.hoveredSystem?.id !== oldHovered?.id;
+        const routeChanged = this.hoveredRoute?.routeKey !== oldRoute?.routeKey;
+
+        if (sysChanged || routeChanged) {
+            const nowHovering = this.hoveredSystem || this.hoveredRoute;
+            const wasHovering = oldHovered || oldRoute;
+            if (nowHovering && !wasHovering) this.scheduleTooltipShow();
+            else if (!nowHovering && wasHovering) this.scheduleTooltipHide();
+            else if (nowHovering && wasHovering) { this.scheduleTooltipHide(); this.scheduleTooltipShow(); }
             if (typeof gameState !== 'undefined') {
                 this.render(gameState.systems, gameState.currentSystem);
             }
         }
 
-        if (this.hoveredSystem && (!oldHovered || oldHovered.id !== this.hoveredSystem.id)) {
-            console.log(`[GalaxyMouse] HOVER: mouse(screen: ${this.mouseX.toFixed(1)}, ${this.mouseY.toFixed(1)}) canvas(${galaxyX.toFixed(1)}, ${galaxyY.toFixed(1)}) hovered "${this.hoveredSystem.name}"`);
-            this.scheduleTooltipShow();
-            if (typeof gameState !== 'undefined') {
-                this.render(gameState.systems, gameState.currentSystem);
-            }
-        }
-
-        // Fleet dot hover (only when no system is hovered)
-        const oldFleetId = this.hoveredRouteFleet ? this.hoveredRouteFleet.dotId : null;
-        this.hoveredRouteFleet = this.hoveredSystem ? null : this.getRouteFleetAtPosition(this.mouseX, this.mouseY);
-        const newFleetId = this.hoveredRouteFleet ? this.hoveredRouteFleet.dotId : null;
-        if (newFleetId !== oldFleetId) {
-            if (typeof gameState !== 'undefined') {
-                this.render(gameState.systems, gameState.currentSystem);
-            }
-        }
     }
     
     // Start a travel animation from fromSystem to toSystem. avgEngine drives transit speed.
@@ -245,7 +236,11 @@ class GalaxyRenderer {
             if (!this._travelAnim) return;
             const t = Math.min(1, (now - start) / segDur);
             this._travelAnim.progress = startPct + (endPct - startPct) * t;
-            this.render(gameState.systems, this._travelAnim.from);
+            if (typeof gameState !== 'undefined' && gameState.state === GAME_STATE.TRAVEL) {
+                if (typeof UISystem !== 'undefined') UISystem.updateTravelProgress(this._travelAnim.progress);
+            } else {
+                this.render(gameState.systems, this._travelAnim.from);
+            }
             if (t < 1) requestAnimationFrame(tick);
             else onDone();
         };
@@ -318,9 +313,18 @@ class GalaxyRenderer {
         this.ctx.save();
         this.ctx.translate(sx, sy);
         this.ctx.rotate(shipAngle);
-        this.ctx.fillStyle = '#cccccc';
-        drawShipShape(this.ctx, verts, S);
-        this.ctx.fill();
+
+        const spriteId  = leaderShip ? leaderShip.shipType.toLowerCase().replace(/ /g, '_') : null;
+        const spriteImg = spriteId && typeof spriteSystem !== 'undefined' ? spriteSystem.getImage(spriteId) : null;
+        if (spriteImg) {
+            const spriteScale = (S * 2) / Math.max(spriteImg.naturalWidth, spriteImg.naturalHeight);
+            spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale);
+        } else {
+            this.ctx.fillStyle = '#cccccc';
+            drawShipShape(this.ctx, verts, S);
+            this.ctx.fill();
+        }
+
         this.ctx.restore();
     }
 
@@ -346,41 +350,51 @@ class GalaxyRenderer {
                                 (!clickedSystem && this.selectedSystem);
         
         if (clickedSystem) {
-            const oldSelected = this.selectedSystem;
             this.selectedSystem = clickedSystem;
-            if (typeof gameState !== 'undefined') gameState.selectedSystem = clickedSystem;
-            console.log(`[GalaxyMouse] click selected: canvas (${x.toFixed(1)}, ${y.toFixed(1)}) galaxy (${galaxyX.toFixed(1)}, ${galaxyY.toFixed(1)}) system "${clickedSystem.name}" (${oldSelected ? 'was: ' + oldSelected.name : 'was: nothing'})`);
-
-            // Center on the selected system and re-render
+            this.selectedRoute = null;
+            if (typeof gameState !== 'undefined') {
+                gameState.selectedSystem = clickedSystem;
+                gameState.selectedRoute  = null;
+            }
             if (typeof gameState !== 'undefined' && clickedSystem) {
                 this.centerOnSystem(clickedSystem);
                 this.render(gameState.systems, gameState.currentSystem);
             }
         } else {
-            const old = this.selectedSystem;
-            this.selectedSystem = null;
-            if (typeof gameState !== 'undefined') gameState.selectedSystem = null;
-            console.log(`[GalaxyMouse] click on nothing: canvas (${x.toFixed(1)}, ${y.toFixed(1)}) galaxy (${galaxyY.toFixed(1)}, ${galaxyY.toFixed(1)}) ${old ? 'deselected ' + old.name : 'nothing was selected'}`);
-
-            // Re-render for deselection
-            if (typeof gameState !== 'undefined') {
-                this.render(gameState.systems, gameState.currentSystem);
+            const clickedRoute = this.getRouteAtPosition(galaxyX, galaxyY);
+            if (clickedRoute) {
+                this.selectedRoute = clickedRoute;
+                this.selectedSystem = null;
+                if (typeof gameState !== 'undefined') {
+                    gameState.selectedRoute  = clickedRoute;
+                    gameState.selectedSystem = null;
+                }
+                if (typeof gameState !== 'undefined') this.render(gameState.systems, gameState.currentSystem);
+                if (typeof UISystem !== 'undefined') {
+                    UISystem.updateSelectedRouteSection(gameState, clickedRoute);
+                    UISystem.updateSelectedSystemSection(gameState);
+                }
+                return;
             }
+            this.selectedSystem = null;
+            this.selectedRoute  = null;
+            if (typeof gameState !== 'undefined') {
+                gameState.selectedSystem = null;
+                gameState.selectedRoute  = null;
+            }
+            if (typeof gameState !== 'undefined') this.render(gameState.systems, gameState.currentSystem);
         }
 
-        // Update UI only for non-visual changes (like updating the current system section)
         if (selectionChanged && typeof gameState !== 'undefined' && typeof UISystem !== 'undefined') {
+            UISystem.updateSelectedRouteSection(gameState, null);
             UISystem.updateCurrentSystemSection(gameState);
             UISystem.updateSelectedSystemSection(gameState);
         }
     }
     
     onMouseLeave() {
-        if (this.hoveredSystem) {
-            console.log(`[GalaxyMouse] LEAVE: mouse(screen: ${this.mouseX.toFixed(1)}, ${this.mouseY.toFixed(1)}) left canvas, unhovered "${this.hoveredSystem.name}"`);
-        }
         this.hoveredSystem = null;
-        this.hoveredRouteFleet = null;
+        this.hoveredRoute = null;
         this.scheduleTooltipHide();
         this.isDragging = false;
         this.dragged = false;
@@ -460,6 +474,55 @@ class GalaxyRenderer {
         return closest;
     }
     
+    getRouteAtPosition(galaxyX, galaxyY) {
+        if (!window.galaxyMapSystems || typeof gameState === 'undefined' || !gameState.routes) return null;
+        const threshold = 7 / (this.scaleX * this.zoom);
+        let closest = null;
+        let closestDist = threshold;
+        for (const sys of window.galaxyMapSystems) {
+            if (!sys.seen || !sys.connections) continue;
+            for (const connId of sys.connections) {
+                const other = window.galaxyMapSystems.find(s => s.id === connId);
+                if (!other || !other.seen) continue;
+                const d = distancePointToLineSegment(galaxyX, galaxyY, sys.x, sys.y, other.x, other.y);
+                if (d < closestDist) {
+                    closestDist = d;
+                    closest = { from: sys, to: other, routeKey: getRouteKey(sys.id, connId) };
+                }
+            }
+        }
+        return closest;
+    }
+
+    updateRouteTooltip(route, currentSystem) {
+        const tooltip = document.getElementById('systemTooltip');
+        if (!tooltip) return;
+        const routeData = (typeof gameState !== 'undefined' && gameState.routes)
+            ? gameState.routes.get(route.routeKey) : null;
+        const isCurrentRoute = currentSystem && currentSystem.id === route.from.id
+            && currentSystem.connections && currentSystem.connections.includes(route.to.id);
+        const tierLabel = route.to.isQueenPlanet ? 'Alien Queen\'s Lair' : `Tier ${route.to.tier}`;
+        let html = `<strong>${route.from.name} → ${route.to.name}</strong><br>${tierLabel}`;
+        if (routeData) {
+            const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
+            html += `<br>Threat: ${strLabel} (${routeData.fleetStrength}/10) · Up to ${routeData.maxEncounters} encounter${routeData.maxEncounters !== 1 ? 's' : ''}`;
+            const topFactions = Object.entries(routeData.factionWeights)
+                .filter(([, w]) => w > 5).sort(([, a], [, b]) => b - a).slice(0, 2);
+            if (topFactions.length) {
+                const names = topFactions.map(([id]) => {
+                    const fd = CONSTANTS.FACTIONS.find(f => f.id === id);
+                    return fd ? fd.name : id;
+                });
+                html += `<br>${names.join(', ')}`;
+            }
+        }
+        if (isCurrentRoute) html += `<br><span style="color:#88ff88;">Click to select · Travel button to depart</span>`;
+        tooltip.innerHTML = html;
+        tooltip.style.left = (this.mouseX + 10) + 'px';
+        tooltip.style.top = (this.mouseY + 10) + 'px';
+        tooltip.style.display = 'block';
+    }
+
     render(systems, currentSystem) {
         this.clear();
         
@@ -483,16 +546,23 @@ class GalaxyRenderer {
         }
         
         if (this.selectedSystem && this.selectedSystem.id !== currentSystem.id) {
-            const dist = distance(currentSystem.x, currentSystem.y, this.selectedSystem.x, this.selectedSystem.y);
             const isConnected = currentSystem.connections && currentSystem.connections.includes(this.selectedSystem.id);
             if (isConnected) {
-                this.drawConnectionLine(currentSystem, this.selectedSystem, '#00ffff'); // Cyan for direct connection
+                this.drawConnectionLine(currentSystem, this.selectedSystem, '#00ffff', 3);
             }
         }
-        
-        // Draw route fleet dots on top of all lines
-        this.drawAllRouteFleetDots();
 
+        // Highlighted hovered route (yellow) and selected route (orange glow)
+        if (this.selectedRoute) {
+            this.ctx.shadowBlur = 8;
+            this.ctx.shadowColor = '#ff8844';
+            this.drawConnectionLine(this.selectedRoute.from, this.selectedRoute.to, '#ff8844', 4);
+            this.ctx.shadowBlur = 0;
+        }
+        if (this.hoveredRoute && this.hoveredRoute.routeKey !== this.selectedRoute?.routeKey) {
+            this.drawConnectionLine(this.hoveredRoute.from, this.hoveredRoute.to, '#ffee44', 3);
+        }
+        
         // Draw all systems
         const travelFromId = this._travelAnim ? this._travelAnim.from.id : null;
         systems.forEach(system => {
@@ -513,11 +583,15 @@ class GalaxyRenderer {
         }
 
         // Draw tooltip
-        if (this.hoveredRouteFleet) {
-            this.updateRouteFleetTooltip(this.hoveredRouteFleet);
-        } else if (this.tooltipVisible && this.hoveredSystem) {
-            this.updateTooltip(this.hoveredSystem, currentSystem);
-        } else if (!this.tooltipVisible) {
+        if (this.tooltipVisible) {
+            if (this.hoveredSystem) {
+                this.updateTooltip(this.hoveredSystem, currentSystem);
+            } else if (this.hoveredRoute) {
+                this.updateRouteTooltip(this.hoveredRoute, currentSystem);
+            } else {
+                this.hideTooltip();
+            }
+        } else {
             this.hideTooltip();
         }
     }
@@ -536,162 +610,25 @@ class GalaxyRenderer {
     
     drawAllConnections(systems) {
         const drawnPairs = new Set();
-        this.routeFleetDots = [];
         this.visibleUnseenIds = new Set();
 
         systems.forEach(system => {
-            if (system.connections) {
-                system.connections.forEach(connId => {
-                    const pairKey = getRouteKey(system.id, connId);
-                    if (!drawnPairs.has(pairKey)) {
-                        drawnPairs.add(pairKey);
-                        const otherSystem = systems.find(s => s.id === connId);
-                        if (otherSystem) {
-                            if (system.seen && otherSystem.seen) {
-                                const isAlienRoute = typeof gameState !== 'undefined' && gameState.alienRoutes && gameState.alienRoutes.has(pairKey);
-                                this.drawConnectionLine(system, otherSystem, isAlienRoute ? '#cc5500' : '#808080');
-                                if (typeof gameState !== 'undefined' && gameState.routeFleets && gameState.routeFleets.has(pairKey)) {
-                                    const currentId = gameState.currentSystem ? gameState.currentSystem.id : null;
-                                    const adjIds    = new Set(gameState.currentSystem ? gameState.currentSystem.connections : []);
-                                    // 2-hop set: connections of connections not already in adjIds or current
-                                    const twoHopIds = new Set();
-                                    for (const adjId of adjIds) {
-                                        const adjSys = gameState.systems.find(s => s.id === adjId);
-                                        if (adjSys) adjSys.connections.forEach(id => {
-                                            if (id !== currentId && !adjIds.has(id)) twoHopIds.add(id);
-                                        });
-                                    }
-                                    const isDirect  = system.id === currentId || otherSystem.id === currentId;
-                                    const isOneHop  = !isDirect && (adjIds.has(system.id) || adjIds.has(otherSystem.id));
-                                    const isTwoHop  = !isDirect && !isOneHop && (twoHopIds.has(system.id) || twoHopIds.has(otherSystem.id));
-                                    if (!isDirect && !isOneHop && !isTwoHop) {
-                                        // Beyond sensor range — skip fleet dots
-                                    } else {
-                                        const zx = this.scaleX * this.zoom;
-                                        const zy = this.scaleY * this.zoom;
-                                        const routeAngle = Math.atan2(otherSystem.y - system.y, otherSystem.x - system.x);
-                                        // Interpolate fleet positions during player transit so they visually
-                                        // advance at the same rate advanceFleets() will commit on arrival.
-                                        const animOffset = this._travelAnim ? this._travelAnim.progress * 0.30 : 0;
-                                        const encounters = gameState.routeFleets.get(pairKey);
-                                        for (const enc of encounters) {
-                                            const rawPos = enc.position + animOffset;
-                                            if (rawPos >= 1) continue; // arrived, will reappear after advanceFleets
-                                            // Direction-aware position in the rendering frame (system→otherSystem).
-                                            const t = enc.fromId !== undefined
-                                                ? (enc.fromId === system.id ? rawPos : 1 - rawPos)
-                                                : rawPos;
-                                            // Fleet faces its travel direction, not just the route direction.
-                                            const fleetAngle = (enc.fromId !== undefined && enc.fromId !== system.id)
-                                                ? routeAngle + Math.PI
-                                                : routeAngle;
-                                            const ex = system.x + (otherSystem.x - system.x) * t;
-                                            const ey = system.y + (otherSystem.y - system.y) * t;
-                                            const factionData = CONSTANTS.FACTIONS.find(f => f.id === enc.faction);
-                                            this.routeFleetDots.push({
-                                                dotId: `${pairKey}|${enc.faction}|${enc.position.toFixed(4)}`,
-                                                key: pairKey,
-                                                faction: enc.faction,
-                                                factionName: factionData ? factionData.name : 'Unknown',
-                                                color: factionData ? factionData.color : '#ff4444',
-                                                x: this.translateX + ex * zx,
-                                                y: this.translateY + ey * zy,
-                                                size: enc.size,
-                                                angle: fleetAngle,
-                                                isUnknown: !isDirect,
-                                            });
-                                        }
-                                    }
-                                }
-                            } else if (system.seen || otherSystem.seen) {
-                                this.drawConnectionLine(system, otherSystem, '#2a2a3a');
-                                if (!system.seen) this.visibleUnseenIds.add(system.id);
-                                if (!otherSystem.seen) this.visibleUnseenIds.add(otherSystem.id);
-                            }
-                        }
-                    }
-                });
-            }
-        });
-    }
-
-    drawAllRouteFleetDots() {
-        const FACTION_SPRITE = { pirates: 'smuggler', police: 'jammer', merchants: 'repair_ship' };
-        const fallbackVerts  = [[2.3, 0], [0.3, -1.0], [-1.8, -1.5], [-1.3, 0], [-1.8, 1.5], [0.3, 1.0]];
-
-        for (const dot of this.routeFleetDots) {
-            const isHovered  = this.hoveredRouteFleet && this.hoveredRouteFleet.dotId === dot.dotId;
-            const S          = isHovered ? 10 : 7;
-            const baseColor  = dot.color || '#ff4444';
-
-            if (dot.isUnknown) {
-                // Non-direct route (1+ hops from player): render a "?" in muted gray, no size label
-                this.ctx.save();
-                this.ctx.font = `bold ${isHovered ? 15 : 12}px Courier New`;
-                this.ctx.textAlign = 'center';
-                this.ctx.textBaseline = 'middle';
-                this.ctx.fillStyle = isHovered ? '#cccccc' : '#666666';
-                this.ctx.fillText('?', dot.x, dot.y);
-                this.ctx.restore();
-                continue;
-            }
-
-            this.ctx.save();
-            this.ctx.translate(dot.x, dot.y);
-            this.ctx.rotate(dot.angle);
-
-            const spriteId  = FACTION_SPRITE[dot.faction];
-            const spriteImg = spriteId ? spriteSystem.getImage(spriteId) : null;
-
-            if (spriteImg) {
-                const spriteScale = (S * 4) / Math.max(spriteImg.naturalWidth, spriteImg.naturalHeight);
-                const tint      = isHovered ? '#ffffff' : baseColor;
-                const tintAlpha = isHovered ? 0.20 : 0.50;
-                spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint, tintAlpha });
-            } else {
-                this.ctx.fillStyle = isHovered ? '#ffffff' : baseColor;
-                drawShipShape(this.ctx, fallbackVerts, S);
-                this.ctx.fill();
-                if (isHovered) {
-                    this.ctx.strokeStyle = '#ffffff';
-                    this.ctx.lineWidth = 1.5;
-                    this.ctx.stroke();
+            if (!system.connections) return;
+            system.connections.forEach(connId => {
+                const pairKey = getRouteKey(system.id, connId);
+                if (drawnPairs.has(pairKey)) return;
+                drawnPairs.add(pairKey);
+                const otherSystem = systems.find(s => s.id === connId);
+                if (!otherSystem) return;
+                if (system.seen && otherSystem.seen) {
+                    this.drawConnectionLine(system, otherSystem, '#808080');
+                } else if (system.seen || otherSystem.seen) {
+                    this.drawConnectionLine(system, otherSystem, '#2a2a3a');
+                    if (!system.seen) this.visibleUnseenIds.add(system.id);
+                    if (!otherSystem.seen) this.visibleUnseenIds.add(otherSystem.id);
                 }
-            }
-
-            this.ctx.restore();
-
-            // Fleet size number — larger font, higher above the icon
-            const fontSize = isHovered ? 14 : 12;
-            this.ctx.font = `bold ${fontSize}px Courier New`;
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'bottom';
-            this.ctx.fillStyle = isHovered ? '#ffffff' : baseColor;
-            this.ctx.fillText(String(dot.size), dot.x, dot.y - S - 8);
-            this.ctx.textAlign = 'left';
-            this.ctx.textBaseline = 'alphabetic';
-        }
-    }
-
-    getRouteFleetAtPosition(screenX, screenY) {
-        const HIT_RADIUS = 12;
-        for (const dot of this.routeFleetDots) {
-            const dx = screenX - dot.x;
-            const dy = screenY - dot.y;
-            if (dx * dx + dy * dy <= HIT_RADIUS * HIT_RADIUS) return dot;
-        }
-        return null;
-    }
-
-    updateRouteFleetTooltip(fleet) {
-        const tooltip = document.getElementById('systemTooltip');
-        if (!tooltip) return;
-        tooltip.innerHTML = fleet.isUnknown
-            ? `<strong>Unknown Fleet</strong><br>Out of sensor range`
-            : `<strong>${fleet.factionName} Fleet</strong><br>Ships: ${fleet.size}`;
-        tooltip.style.left = (this.mouseX + 10) + 'px';
-        tooltip.style.top  = (this.mouseY + 10) + 'px';
-        tooltip.style.display = 'block';
+            });
+        });
     }
     
     drawCurrentSystemConnections(systems, currentSystem) {
@@ -704,9 +641,7 @@ class GalaxyRenderer {
         currentSystem.connections.forEach(connId => {
             const otherSystem = systems.find(s => s.id === connId);
             if (otherSystem) {
-                const rk = getRouteKey(currentSystem.id, connId);
-                const isAlienRoute = typeof gameState !== 'undefined' && gameState.alienRoutes && gameState.alienRoutes.has(rk);
-                this.drawConnectionLine(currentSystem, otherSystem, isAlienRoute ? '#ff8800' : '#c0c0c0');
+                this.drawConnectionLine(currentSystem, otherSystem, '#c0c0c0');
             }
         });
     }
@@ -770,9 +705,9 @@ class GalaxyRenderer {
         return null; // No path found
     }
     
-    drawConnectionLine(system1, system2, color) {
+    drawConnectionLine(system1, system2, color, width = 2) {
         this.ctx.strokeStyle = color;
-        this.ctx.lineWidth = 2;
+        this.ctx.lineWidth = width;
         
         const zoomedScaleX = this.scaleX * this.zoom;
         const zoomedScaleY = this.scaleY * this.zoom;
@@ -813,16 +748,18 @@ class GalaxyRenderer {
         
         // Determine color based on new scheme
         let color;
-        if (isHovered) {
-            color = '#ffffff'; // White for hovered systems
+        if (system.isQueenPlanet) {
+            color = isHovered ? '#ffcc00' : '#ff4400'; // orange-red for queen lair
+        } else if (isHovered) {
+            color = '#ffffff';
         } else if (isTransitOrigin) {
-            color = '#1a5c1a'; // Dark green — ship has departed, system no longer occupied
+            color = '#1a5c1a';
         } else if (isCurrent) {
-            color = '#00ff00'; // Green for current
+            color = '#00ff00';
         } else if (isReachable) {
-            color = '#c0c0c0'; // Light gray for reachable
+            color = '#c0c0c0';
         } else {
-            color = '#808080'; // Gray for others
+            color = '#808080';
         }
         
         // Draw system circle with fixed size
@@ -849,10 +786,10 @@ class GalaxyRenderer {
             this.ctx.stroke();
         }
 
-        // Mark alien capital with a pulsing orange ring
-        if (typeof gameState !== 'undefined' && gameState.alienCapitalId === system.id) {
+        // Pulsing ring for the alien queen's planet
+        if (system.isQueenPlanet) {
             const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 400);
-            this.ctx.strokeStyle = `rgba(255, 136, 0, ${pulse})`;
+            this.ctx.strokeStyle = `rgba(255, 68, 0, ${pulse})`;
             this.ctx.lineWidth = 2;
             this.ctx.beginPath();
             this.ctx.arc(x, y, fixedRadius + 7, 0, Math.PI * 2);
@@ -872,31 +809,22 @@ class GalaxyRenderer {
             return;
         }
 
-        const dist = distance(currentSystem.x, currentSystem.y, system.x, system.y);
-        const reachable = dist <= CONSTANTS.MAX_TRAVEL_DISTANCE;
-        const travelInfo = reachable ? `Distance: ${dist.toFixed(0)} ly` : `Too far: ${dist.toFixed(0)} ly`;
+        const isConnected = currentSystem.connections && currentSystem.connections.includes(system.id);
+        const tierLabel = system.isQueenPlanet ? 'Alien Queen\'s lair' : `Tier ${system.tier}`;
 
         let html = `<strong>${system.name}</strong><br>`;
-        html += `${travelInfo}<br>`;
-        html += `Visited: ${system.visited ? 'Yes' : 'No'}`;
-
-        const isConnected = currentSystem.connections && currentSystem.connections.includes(system.id);
-        if (isConnected && typeof gameState !== 'undefined' && gameState.routeFleets) {
-            const routeKey = getRouteKey(currentSystem.id, system.id);
-            const encounters = gameState.routeFleets.get(routeKey);
-            if (encounters && encounters.length > 0) {
-                const summary = encounters.map(e => {
-                    const f = CONSTANTS.FACTIONS.find(f => f.id === e.faction);
-                    return `<span style="color:${f ? f.color : '#fff'}">${f ? f.name : '?'}(${e.size})</span>`;
-                }).join(' ');
-                html += `<br>Patrols: ${summary}`;
-            } else {
-                html += `<br>Patrols: None`;
-            }
-        }
-
-        if (!reachable) {
-            html += '<br><span style="color: #ff6600;">Out of range</span>';
+        html += `${tierLabel}<br>`;
+        if (system.visited) {
+            const venues = [];
+            if (system.hasRepair)     venues.push('Dock');
+            if (system.hasShipyard)   venues.push('Shipyard');
+            if (system.hasMechanic)   venues.push('Mechanic');
+            if (system.hasCourthouse) venues.push('Courthouse');
+            html += venues.length ? venues.join(' · ') : 'No venues';
+        } else if (isConnected) {
+            html += 'Click to travel here';
+        } else {
+            html += system.visited ? 'Visited' : 'Not yet visited';
         }
 
         tooltip.innerHTML = html;
@@ -922,9 +850,13 @@ class GalaxyRenderer {
         }
         
         this.tooltipShowTimer = setTimeout(() => {
-            if (this.hoveredSystem) {
+            if (this.hoveredSystem || this.hoveredRoute) {
                 this.tooltipVisible = true;
-                this.updateTooltip(this.hoveredSystem, gameState.currentSystem);
+                if (this.hoveredSystem) {
+                    this.updateTooltip(this.hoveredSystem, gameState.currentSystem);
+                } else {
+                    this.updateRouteTooltip(this.hoveredRoute, gameState.currentSystem);
+                }
             }
             this.tooltipShowTimer = null;
         }, CONSTANTS.GALAXY_TOOLTIP_DELAY);

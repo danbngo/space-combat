@@ -122,7 +122,7 @@ const CONSTANTS_SHIPS = {
             vertices: [[1.5, 0], [0.8, -0.8], [-0.2, -1.2], [-1.8, -1.0], [-2.0, -0.4], [-2.0, 0.4], [-1.8, 1.0], [-0.2, 1.2], [0.8, 0.8]],
         },
         {
-            type: 'Disruptor',
+            type: 'Hijacker',
             description: 'Small, nimble electronic warfare craft built around its Hack Module. Weak in a straight fight but devastating at turning enemy ships against each other.',
             sizeMult: 0.75,
             hullMult: 0.65, shieldMult: 0.8, laserMult: 0.9, radarMult: 1.2, engineMult: 1.6,
@@ -190,6 +190,7 @@ const CONSTANTS_SHIPS = {
         {
             id: 'pirates',
             name: 'Pirates',
+            description: 'Criminal syndicates raiding shipping lanes for profit. Always hostile on sight. Standard credit bounty on defeat.',
             color: '#ff4444',
             shipTypes: ['Raider', 'Fighter', 'Smuggler', 'Destroyer'],
             creditMult: 1,
@@ -197,6 +198,7 @@ const CONSTANTS_SHIPS = {
         {
             id: 'merchants',
             name: 'Merchants',
+            description: 'Civilian trading convoys. They fight back if attacked but prefer to flee. Rich cargo means high credit drops.',
             color: '#ffdd44',
             shipTypes: ['Freighter', 'Repair Ship', 'Corvette', 'Amplifier'],
             creditMult: 2,
@@ -204,6 +206,7 @@ const CONSTANTS_SHIPS = {
         {
             id: 'police',
             name: 'Police',
+            description: 'System law enforcement. Friendly by default — but attack on sight if you carry an active bounty. Standard credit yield.',
             color: '#4488ff',
             shipTypes: ['Corvette', 'Destroyer', 'Interceptor', 'Fighter', 'Jammer'],
             creditMult: 1,
@@ -211,6 +214,7 @@ const CONSTANTS_SHIPS = {
         {
             id: 'soldiers',
             name: 'Soldiers',
+            description: 'Military patrols operating under standing orders. Usually allow passage with a clean record. Very low credit yield.',
             color: '#44ff44',
             shipTypes: ['Corvette', 'Destroyer', 'Fighter'],
             creditMult: 0.25,
@@ -218,6 +222,7 @@ const CONSTANTS_SHIPS = {
         {
             id: 'smugglers',
             name: 'Smugglers',
+            description: 'Contraband runners evading law enforcement. Well-armed if cornered. Defeating them yields high credits.',
             color: '#aa44ff',
             shipTypes: ['Smuggler', 'Freighter', 'Corvette', 'Scout'],
             creditMult: 2,
@@ -225,10 +230,44 @@ const CONSTANTS_SHIPS = {
         {
             id: 'aliens',
             name: 'Aliens',
+            description: 'Unknown entities advancing from deep space. No negotiation possible. Encountered with increasing frequency in outer systems.',
             color: '#ff8800',
             shipTypes: ['Alien Phantom', 'Alien Ravager', 'Alien Titan', 'Alien Stalker'],
             creditMult: 0,
-            routeSpawn: false, // not placed by generateEncountersForRoute
         },
     ],
+
+    // Tiered ship pools per faction — used with fleet strength (low=1-3, mid=4-6, high=7-10)
+    FACTION_SHIP_POOLS: {
+        pirates:   {
+            low:  ['Fighter', 'Smuggler'],
+            mid:  ['Raider', 'Fighter', 'Smuggler'],
+            high: ['Raider', 'Destroyer', 'Corvette'],
+        },
+        merchants: {
+            low:  ['Freighter'],
+            mid:  ['Freighter', 'Repair Ship', 'Corvette'],
+            high: ['Freighter', 'Repair Ship', 'Amplifier', 'Carrier'],
+        },
+        police:    {
+            low:  ['Fighter', 'Corvette'],
+            mid:  ['Corvette', 'Destroyer', 'Interceptor'],
+            high: ['Destroyer', 'Jammer', 'Battleship', 'Carrier'],
+        },
+        soldiers:  {
+            low:  ['Fighter', 'Corvette'],
+            mid:  ['Corvette', 'Destroyer'],
+            high: ['Destroyer', 'Battleship', 'Carrier'],
+        },
+        smugglers: {
+            low:  ['Smuggler', 'Scout'],
+            mid:  ['Smuggler', 'Raider', 'Scout'],
+            high: ['Smuggler', 'Hijacker', 'Raider'],
+        },
+        aliens:    {
+            low:  ['Alien Phantom'],
+            mid:  ['Alien Phantom', 'Alien Ravager', 'Alien Stalker'],
+            high: ['Alien Ravager', 'Alien Stalker', 'Alien Titan'],
+        },
+    },
 };

@@ -1,43 +1,52 @@
 const CONSTANTS_GALAXY = {
-    // Layout
-    MIN_TRAVEL_DISTANCE:  150,
-    MAX_TRAVEL_DISTANCE:  240,
-    TARGET_SYSTEM_COUNT:  100,
-    SYSTEM_COUNT_VARIANCE: 25,      // ±25 (75–125 total)
-    GALAXY_WIDTH:  1500,
-    GALAXY_HEIGHT: 1500,
-    MIN_CONNECTIONS_PER_SYSTEM: 1,
-    MAX_CONNECTIONS_PER_SYSTEM: 5,
+    // Galaxy canvas dimensions (used by renderer)
+    GALAXY_WIDTH:  1800,
+    GALAXY_HEIGHT:  700,
 
-    // Generation tuning
-    GALAXY_GEN_MAX_ATTEMPTS:     20,  // retries before falling back to smaller galaxy
-    GALAXY_MIN_SYSTEM_SPACING:   80,  // minimum pixel distance between systems
-    SYSTEM_PLACEMENT_ATTEMPTS:   50,  // tries to find a valid position for each system
-    MIN_SYSTEM_ROUTE_CLEARANCE:  50,  // minimum px a non-endpoint system must be from any route
-    ROUTE_NEARBY_THRESHOLD:      80,  // threshold for proximity-connection enforcement pass
-    // Route fleet encounters
-    FLEET_MAX_PER_ROUTE:        1,     // max encounter fleets on a single route (0–1 spawned)
-    FLEET_SIZE_MIN:             1,     // min ships in an encounter fleet
-    FLEET_SIZE_MAX:             5,     // max ships in an encounter fleet
-    FLEET_PIRATE_ATTACK_CHANCE: 0.5,  // prob pirates attack on sight
-    FLEET_POLICE_ATTACK_CHANCE: 0.5,  // prob police attack when player has bounty
-    FLEET_ATTACK_BOUNTY:        1000, // bounty gained from attacking police or merchants
+    // Tree generation
+    TREE_TIERS:          16,    // tiers 0–15 (0 = player start, 15 = alien queen)
+    TREE_QUEEN_TIER:     15,
+    TREE_NODES_MIN:       2,    // min nodes per interior tier
+    TREE_NODES_MAX:       4,    // max nodes per interior tier
+    TREE_BRANCHES_MIN:    1,    // min forward connections per node
+    TREE_BRANCHES_MAX:    3,    // max forward connections per node
 
-    // Travel animation — speed in galaxy-units/ms per engine point
-    // At engine=10 and a 195-unit (average) route this gives ~1000 ms transit time
-    GALAXY_TRAVEL_SPEED_FACTOR: 0.0195,
+    // Encounter scaling
+    ENCOUNTER_CHANCE_BASE:  0.35,   // probability of an encounter slot firing at strength 1
+    ENCOUNTER_CHANCE_MAX:   0.85,   // probability at strength 10
+    ROUTE_MAX_ENCOUNTERS:   5,
 
-    // In-game time: days = routeDistance / (avgEngine * TRAVEL_TIME_SCALE)
-    // At engine=10 and 195-unit route: 195 / (10 * 19.5) = 1.0 day
+    // Fleet strength: base = 1 + floor(destinationTier/QUEEN_TIER * 8), then ±JITTER
+    FLEET_STRENGTH_BASE:  1,
+    FLEET_STRENGTH_MAX:   10,
+    FLEET_STRENGTH_JITTER: 1,   // ±jitter added to base strength per route
+
+    // Venue spawn probabilities (linear interpolation from tier 0 to QUEEN_TIER-1)
+    VENUE_SHIPYARD_BASE:   0.35,
+    VENUE_SHIPYARD_MAX:    0.85,
+    VENUE_MECHANIC_BASE:   0.20,
+    VENUE_MECHANIC_MAX:    0.75,
+    VENUE_COURTHOUSE_BASE: 0.10,
+    VENUE_COURTHOUSE_MAX:  0.50,
+
+    // Alien faction weight ramp-up starts at this tier and reaches full weight at QUEEN_TIER
+    ALIEN_WEIGHT_START_TIER: 4,
+
+    // Travel animation speed: galaxy-units / ms / engine-point
+    GALAXY_TRAVEL_SPEED_FACTOR: 0.0042,
+    // In-game time: days = distance / (avgEngine * TRAVEL_TIME_SCALE)
     TRAVEL_TIME_SCALE: 19.5,
 
+    // Bounty gained for attacking police / merchants
+    FLEET_ATTACK_BOUNTY: 1000,
+
     // Renderer
-    GALAXY_DEFAULT_ZOOM:    4,
-    GALAXY_MIN_ZOOM:        0.5,
-    GALAXY_MAX_ZOOM:        20,
-    GALAXY_ZOOM_STEP:       1.15,  // zoom multiplier per click/scroll step
-    GALAXY_CANVAS_PADDING:  50,    // pixel padding when fitting galaxy to canvas
-    GALAXY_SYSTEM_RADIUS:    8,    // fixed screen-space radius of system dots (px)
-    GALAXY_SYSTEM_HIT_RADIUS: 40,  // screen-space click/hover hit radius (px)
-    GALAXY_TOOLTIP_DELAY:   500,   // ms before tooltip appears/disappears
+    GALAXY_DEFAULT_ZOOM:     1,
+    GALAXY_MIN_ZOOM:         0.3,
+    GALAXY_MAX_ZOOM:         20,
+    GALAXY_ZOOM_STEP:        1.15,
+    GALAXY_CANVAS_PADDING:   50,
+    GALAXY_SYSTEM_RADIUS:     8,
+    GALAXY_SYSTEM_HIT_RADIUS: 10,
+    GALAXY_TOOLTIP_DELAY:    500,
 };

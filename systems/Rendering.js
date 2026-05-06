@@ -327,10 +327,14 @@ class RenderingSystem {
             // Polygon shield outline (vector ships only)
             if (!isWreck && (ship.shields > 0 || shieldFlash)) {
                 const alpha = shieldFlash ? 1 : 0.8;
-                this.ctx.strokeStyle = shieldFlash ? `rgba(255,0,0,${alpha})` : `rgba(0,200,255,${alpha})`;
+                const glowColor = shieldFlash ? `rgba(255,0,0,${alpha})` : `rgba(0,200,255,${alpha})`;
+                this.ctx.strokeStyle = glowColor;
+                this.ctx.shadowColor = glowColor;
+                this.ctx.shadowBlur = 10;
                 this.ctx.lineWidth = 1 / this.zoom;
                 drawShipShape(this.ctx, verts, SIZE * 1.5);
                 this.ctx.stroke();
+                this.ctx.shadowBlur = 0;
             }
         }
 

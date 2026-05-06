@@ -1,4 +1,5 @@
 // TooltipSystem — data-tooltip="..." on any element triggers a floating tooltip.
+// Rich tooltips: data-tooltip-title="Name" data-tooltip-body="Description"
 // Call TooltipSystem.init() once at startup.
 class TooltipSystem {
     static init() {
@@ -9,9 +10,14 @@ class TooltipSystem {
         this._el = el;
 
         document.addEventListener('mouseover', e => {
-            const target = e.target.closest('[data-tooltip]');
+            const target = e.target.closest('[data-tooltip],[data-tooltip-title]');
             if (target) {
-                this._el.textContent = target.dataset.tooltip;
+                if (target.dataset.tooltipTitle) {
+                    const body = target.dataset.tooltipBody || '';
+                    this._el.innerHTML = `<strong style="color:#eef2ff;display:block;margin-bottom:2px;">${target.dataset.tooltipTitle}</strong>${body}`;
+                } else {
+                    this._el.textContent = target.dataset.tooltip;
+                }
                 this._el.style.display = 'block';
             } else {
                 this._el.style.display = 'none';

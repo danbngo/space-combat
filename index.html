@@ -34,6 +34,12 @@
                             <p id="selectedSystemStatus"></p>
                             <div id="selectedSystemActions" class="station-action-row"></div>
                         </div>
+                        <div id="selectedRouteSection" class="system-section" style="display:none;">
+                            <div class="header-3">Route Info</div>
+                            <p id="selectedRouteName" style="font-weight:bold;margin:0.3em 0;"></p>
+                            <div id="selectedRouteInfo"></div>
+                            <div id="selectedRouteActions" class="station-action-row" style="margin-top:0.5em;"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -121,6 +127,38 @@
                         </div>
                         <div id="systemLogContent"></div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Travel Screen -->
+    <div id="travelScreen" class="screen">
+        <div class="travel-container">
+            <div class="travel-layout">
+                <div class="travel-sidebar">
+                    <div id="travelPlayerPanel" class="system-info"></div>
+                </div>
+                <div class="travel-main">
+                    <div class="header-2" id="travelHeader">Traveling...</div>
+                    <p id="travelSubheader" style="color:#aaa;margin:0.2em 0 0.8em;font-size:0.9em;"></p>
+
+                    <canvas id="travelCanvas" class="travel-canvas"></canvas>
+
+                    <div class="travel-progress-wrapper">
+                        <div class="travel-progress-track">
+                            <div id="travelProgressFill" class="travel-progress-fill"></div>
+                            <div id="travelEncounterMarkers"></div>
+                            <div id="travelShipMarker" class="travel-ship-marker"></div>
+                        </div>
+                        <div class="travel-route-labels">
+                            <span id="travelOriginLabel" style="color:#888;font-size:0.8em;"></span>
+                            <span id="travelProgressPct" style="color:#00ff88;font-size:0.8em;font-weight:bold;"></span>
+                            <span id="travelDestLabel" style="color:#aaa;font-size:0.8em;"></span>
+                        </div>
+                    </div>
+
+                    <div id="travelRouteInfo" style="margin-top:1.5em;color:#aaa;font-size:0.85em;line-height:1.7;"></div>
                 </div>
             </div>
         </div>

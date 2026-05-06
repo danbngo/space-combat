@@ -1,548 +1,261 @@
 // Space Travel System
 class SpaceTravel {
-    static doLineSegmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
-        const ccw = (ax, ay, bx, by, cx, cy) => {
-            return (cy - ay) * (bx - ax) > (by - ay) * (cx - ax);
-        };
-        return ccw(x1, y1, x3, y3, x4, y4) !== ccw(x2, y2, x3, y3, x4, y4) &&
-               ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
-    }
 
-    static wouldConnectionIntersect(system1, system2, systems) {
-        for (let sys of systems) {
-            if (sys.id === system1.id || sys.id === system2.id) continue;
+    // ── Tree generation ──────────────────────────────────────────────────────
 
-            if (sys.connections) {
-                for (let connId of sys.connections) {
-                    const connSys = systems.find(s => s.id === connId);
-                    if (connSys && connSys.id > sys.id) {
-                        if (this.doLineSegmentsIntersect(
-                            system1.x, system1.y, system2.x, system2.y,
-                            sys.x, sys.y, connSys.x, connSys.y
-                        )) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    }
+    static generateTree() {
+        const TIERS      = CONSTANTS.TREE_TIERS;       // 16
+        const QUEEN_TIER = CONSTANTS.TREE_QUEEN_TIER;  // 15
+        const W          = CONSTANTS.GALAXY_WIDTH;
+        const H          = CONSTANTS.GALAXY_HEIGHT;
+        const X_START    = 100;
+        const X_END      = W - 100;
+        const tierStep   = (X_END - X_START) / (TIERS - 1);
 
-    static getSystemsNearRoute(system1, system2, systems, threshold = CONSTANTS.ROUTE_NEARBY_THRESHOLD) {
-        const nearby = [];
-        for (let sys of systems) {
-            if (sys.id === system1.id || sys.id === system2.id) continue;
-
-            const dist = distancePointToLineSegment(
-                sys.x, sys.y,
-                system1.x, system1.y,
-                system2.x, system2.y
-            );
-
-            if (dist < threshold) {
-                nearby.push({ system: sys, distance: dist });
-            }
-        }
-        return nearby.sort((a, b) => a.distance - b.distance);
-    }
-
-    // For each system, find the closest route it is NOT an endpoint of, log the distance.
-    // Algorithm: point-to-segment projection — project P onto segment AB via
-    //   t = clamp(((P−A)·(B−A)) / |AB|², 0, 1), closest point Q = A + t(B−A), dist = |P−Q|
-    static logRouteProximities(systems) {
-        const clearance = CONSTANTS.MIN_SYSTEM_ROUTE_CLEARANCE;
-        let violations = 0;
-        const rows = [];
-
-        for (const sys of systems) {
-            let minDist = Infinity;
-            let minRoute = '—';
-
-            for (const a of systems) {
-                if (!a.connections) continue;
-                for (const bId of a.connections) {
-                    if (bId <= a.id) continue; // each route once
-                    if (sys.id === a.id || sys.id === bId) continue;
-                    const b = systems.find(s => s.id === bId);
-                    if (!b) continue;
-                    const d = distancePointToLineSegment(sys.x, sys.y, a.x, a.y, b.x, b.y);
-                    if (d < minDist) { minDist = d; minRoute = `${a.name} → ${b.name}`; }
-                }
-            }
-
-            const ok = minDist >= clearance;
-            if (!ok) violations++;
-            rows.push({ name: sys.name, minDist: minDist === Infinity ? '∞' : minDist.toFixed(1), minRoute, ok });
-        }
-
-        console.groupCollapsed(`[Galaxy] Route clearance report — threshold ${clearance}px — ${violations} violation(s) in ${systems.length} systems`);
-        rows.forEach(r => {
-            const tag = r.ok ? '✓' : '✗ VIOLATION';
-            console.log(`  ${tag}  ${r.name.padEnd(30)} nearest non-own route: ${String(r.minDist).padStart(6)}px  (${r.minRoute})`);
-        });
-        console.groupEnd();
-    }
-
-    static generateUniverse() {
-        let attempts = 0;
-        let systems = null;
-
-        while (attempts < CONSTANTS.GALAXY_GEN_MAX_ATTEMPTS) {
-            const targetCount = CONSTANTS.TARGET_SYSTEM_COUNT + randomInt(-CONSTANTS.SYSTEM_COUNT_VARIANCE, CONSTANTS.SYSTEM_COUNT_VARIANCE);
-            systems = this.generateGalaxy(targetCount);
-
-            if (systems && systems.length >= CONSTANTS.TARGET_SYSTEM_COUNT - CONSTANTS.SYSTEM_COUNT_VARIANCE &&
-                systems.length <= CONSTANTS.TARGET_SYSTEM_COUNT + CONSTANTS.SYSTEM_COUNT_VARIANCE) {
-
-                if (this.isGalaxyConnected(systems)) {
-                    if (this.verifyGalaxyConstraints(systems)) {
-                        console.log(`Galaxy generated successfully with ${systems.length} systems after ${attempts + 1} attempt(s)`);
-                        this.logRouteProximities(systems);
-                        return systems;
-                    }
-                }
-            }
-
-            attempts++;
-        }
-
-        console.warn(`Failed to generate valid galaxy after ${CONSTANTS.GALAXY_GEN_MAX_ATTEMPTS} attempts, returning fallback`);
-        return this.generateGalaxy(CONSTANTS.TARGET_SYSTEM_COUNT - CONSTANTS.SYSTEM_COUNT_VARIANCE);
-    }
-
-    static generateGalaxy(targetCount) {
         const systems = [];
+        const byTier  = [];
+        let   nextId  = 0;
 
-        // Phase 1: Place systems with minimum spacing
-        for (let i = 0; i < targetCount; i++) {
-            let x, y, validPosition = false;
-            let attempts = 0;
+        // ── Place nodes tier by tier ─────────────────────────────────────────
+        for (let tier = 0; tier < TIERS; tier++) {
+            byTier.push([]);
 
-            while (!validPosition && attempts < CONSTANTS.SYSTEM_PLACEMENT_ATTEMPTS) {
-                x = randomInt(100, CONSTANTS.GALAXY_WIDTH - 100);
-                y = randomInt(100, CONSTANTS.GALAXY_HEIGHT - 100);
+            const nodeCount = (tier === 0 || tier === QUEEN_TIER)
+                ? 1
+                : randomInt(CONSTANTS.TREE_NODES_MIN, CONSTANTS.TREE_NODES_MAX);
 
-                validPosition = true;
-                for (let sys of systems) {
-                    if (distance(x, y, sys.x, sys.y) < CONSTANTS.GALAXY_MIN_SYSTEM_SPACING) {
-                        validPosition = false;
-                        break;
-                    }
-                }
+            const baseX = X_START + tier * tierStep;
 
-                attempts++;
-            }
+            for (let j = 0; j < nodeCount; j++) {
+                // Spread nodes evenly in Y, from 80 to H-80
+                const yBase = nodeCount === 1
+                    ? H / 2
+                    : 80 + (j / (nodeCount - 1)) * (H - 160);
+                const y = Math.max(60, Math.min(H - 60, yBase + randomInt(-20, 20)));
+                const x = baseX + randomInt(-12, 12);
 
-            if (validPosition) {
-                systems.push({
-                    id: i,
+                // Venue probabilities — scale linearly with tier fraction
+                const tierFrac = tier < QUEEN_TIER ? tier / (QUEEN_TIER - 1) : 1;
+                const lerp = (a, b) => a + tierFrac * (b - a);
+
+                const sys = {
+                    id:   nextId++,
                     name: getRandomSystemName(),
-                    x: x,
-                    y: y,
-                    visited: false,
-                    seen: false,
-                    resourceLevel: randomInt(1, 10),
-                    connections: []
-                });
+                    tier,
+                    x,
+                    y,
+                    visited:  false,
+                    seen:     false,
+                    connections: [],   // forward edges to children only
+                    parentId: null,
+                    isQueenPlanet: tier === QUEEN_TIER,
+
+                    // Every non-queen system has a dock (repair)
+                    hasRepair:     tier < QUEEN_TIER,
+                    hasShipyard:   tier < QUEEN_TIER && Math.random() < lerp(CONSTANTS.VENUE_SHIPYARD_BASE,   CONSTANTS.VENUE_SHIPYARD_MAX),
+                    hasMechanic:   tier < QUEEN_TIER && Math.random() < lerp(CONSTANTS.VENUE_MECHANIC_BASE,   CONSTANTS.VENUE_MECHANIC_MAX),
+                    hasCourthouse: tier < QUEEN_TIER && Math.random() < lerp(CONSTANTS.VENUE_COURTHOUSE_BASE, CONSTANTS.VENUE_COURTHOUSE_MAX),
+                };
+
+                byTier[tier].push(sys);
+                systems.push(sys);
             }
         }
 
-        // Phase 2: Build connections respecting constraints
-        this.buildConnectedGraph(systems);
+        // ── Wire forward connections tier by tier ────────────────────────────
+        const routes = new Map();
 
-        // Phase 2.5: Ensure all nearby systems are connected
-        this.enforceProximityConnections(systems);
+        for (let tier = 0; tier < TIERS - 1; tier++) {
+            const parents  = byTier[tier];
+            const children = byTier[tier + 1];
 
-        // Phase 3: Remove underconnected systems, remap IDs, repeat until stable
-        let valid = systems.filter(s => s.connections.length >= CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM);
-        let prevLen = -1;
-        while (valid.length !== prevLen) {
-            prevLen = valid.length;
-            const idMap = new Map(valid.map((sys, idx) => [sys.id, idx]));
-            valid.forEach((sys, idx) => {
-                sys.id = idx;
-                sys.connections = sys.connections
-                    .map(oldId => idMap.get(oldId))
-                    .filter(newId => newId !== undefined);
-            });
-            valid = valid.filter(s => s.connections.length >= CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM);
-        }
+            // Track which children have been connected
+            const connected = new Set();
 
-        return valid;
-    }
-
-    // Returns true if any non-endpoint system violates MIN_SYSTEM_ROUTE_CLEARANCE for segment s1→s2
-    static routeViolatesClearance(s1, s2, systems) {
-        const clearance = CONSTANTS.MIN_SYSTEM_ROUTE_CLEARANCE;
-        for (const sys of systems) {
-            if (sys.id === s1.id || sys.id === s2.id) continue;
-            if (distancePointToLineSegment(sys.x, sys.y, s1.x, s1.y, s2.x, s2.y) < clearance) return true;
-        }
-        return false;
-    }
-
-    static buildConnectedGraph(systems) {
-        const MIN_DIST = CONSTANTS.MIN_TRAVEL_DISTANCE;
-        const MAX_DIST = CONSTANTS.MAX_TRAVEL_DISTANCE;
-        const MIN_CONN = CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM;
-        const MAX_CONN = CONSTANTS.MAX_CONNECTIONS_PER_SYSTEM;
-
-        const possibleConnections = new Map();
-        systems.forEach(sys1 => {
-            possibleConnections.set(sys1.id, []);
-
-            systems.forEach(sys2 => {
-                if (sys1.id !== sys2.id) {
-                    const dist = distance(sys1.x, sys1.y, sys2.x, sys2.y);
-                    if (dist >= MIN_DIST && dist <= MAX_DIST) {
-                        // Hard-filter: skip routes that pass within MIN_SYSTEM_ROUTE_CLEARANCE of any non-endpoint system
-                        if (this.routeViolatesClearance(sys1, sys2, systems)) return;
-                        possibleConnections.get(sys1.id).push({
-                            systemId: sys2.id,
-                            distance: dist,
-                        });
-                    }
-                }
-            });
-
-            // Prefer shorter routes
-            possibleConnections.get(sys1.id).sort((a, b) => a.distance - b.distance);
-        });
-
-        // Phase 1: Ensure minimum connectivity
-        systems.forEach(sys => {
-            const possibleConn = possibleConnections.get(sys.id);
-            while (sys.connections.length < MIN_CONN && possibleConn.length > 0) {
-                const connection = possibleConn.shift();
-                const otherSystem = systems.find(s => s.id === connection.systemId);
-                if (!otherSystem) continue;
-
-                if (!sys.connections.includes(connection.systemId) &&
-                    !otherSystem.connections.includes(sys.id)) {
-                    if (!this.wouldConnectionIntersect(sys, otherSystem, systems)) {
-                        sys.connections.push(connection.systemId);
-                        otherSystem.connections.push(sys.id);
+            // Each parent branches to 1–BRANCHES_MAX children (closest by Y first)
+            for (const parent of parents) {
+                const maxBranches = Math.min(
+                    randomInt(CONSTANTS.TREE_BRANCHES_MIN, CONSTANTS.TREE_BRANCHES_MAX),
+                    children.length
+                );
+                const sorted = [...children].sort((a, b) => Math.abs(a.y - parent.y) - Math.abs(b.y - parent.y));
+                let branches = 0;
+                for (const child of sorted) {
+                    if (branches >= maxBranches) break;
+                    if (!parent.connections.includes(child.id)) {
+                        parent.connections.push(child.id);
+                        if (child.parentId === null) child.parentId = parent.id;
+                        connected.add(child.id);
+                        routes.set(getRouteKey(parent.id, child.id), this.generateRouteData(tier + 1));
+                        branches++;
                     }
                 }
             }
-        });
 
-        // Phase 2: Add additional connections up to max
-        systems.forEach(sys => {
-            if (sys.connections.length < MAX_CONN) {
-                const possibleConn = possibleConnections.get(sys.id);
-                for (let conn of possibleConn) {
-                    if (sys.connections.length >= MAX_CONN) break;
-
-                    const otherSystem = systems.find(s => s.id === conn.systemId);
-                    if (!otherSystem) continue;
-                    if (!sys.connections.includes(conn.systemId) &&
-                        otherSystem.connections.length < MAX_CONN) {
-                        if (!this.wouldConnectionIntersect(sys, otherSystem, systems)) {
-                            sys.connections.push(conn.systemId);
-                            otherSystem.connections.push(sys.id);
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    static enforceProximityConnections(systems) {
-        const MAX_DIST = CONSTANTS.MAX_TRAVEL_DISTANCE;
-        const MAX_CONN = CONSTANTS.MAX_CONNECTIONS_PER_SYSTEM;
-
-        const missingConnections = [];
-
-        for (let i = 0; i < systems.length; i++) {
-            for (let j = i + 1; j < systems.length; j++) {
-                const dist = distance(systems[i].x, systems[i].y, systems[j].x, systems[j].y);
-
-                if (dist <= MAX_DIST) {
-                    if (!systems[i].connections.includes(systems[j].id) &&
-                        !systems[j].connections.includes(systems[i].id)) {
-                        missingConnections.push({ sys1: systems[i], sys2: systems[j], distance: dist });
+            // Ensure every child has at least one parent
+            for (const child of children) {
+                if (!connected.has(child.id)) {
+                    const closest = parents.reduce((a, b) =>
+                        Math.abs(a.y - child.y) < Math.abs(b.y - child.y) ? a : b
+                    );
+                    if (!closest.connections.includes(child.id)) {
+                        closest.connections.push(child.id);
+                        if (child.parentId === null) child.parentId = closest.id;
+                        routes.set(getRouteKey(closest.id, child.id), this.generateRouteData(tier + 1));
                     }
                 }
             }
         }
 
-        for (let missing of missingConnections) {
-            const { sys1, sys2 } = missing;
-
-            const nearbyToRoute = this.getSystemsNearRoute(sys1, sys2, systems, CONSTANTS.ROUTE_NEARBY_THRESHOLD);
-            if (nearbyToRoute.length > 0) {
-                let routedThrough = false;
-                for (let nearby of nearbyToRoute) {
-                    const intermediate = nearby.system;
-                    const d1 = distance(sys1.x, sys1.y, intermediate.x, intermediate.y);
-                    const d2 = distance(intermediate.x, intermediate.y, sys2.x, sys2.y);
-
-                    if (d1 <= MAX_DIST && d2 <= MAX_DIST &&
-                        d1 >= CONSTANTS.MIN_TRAVEL_DISTANCE && d2 >= CONSTANTS.MIN_TRAVEL_DISTANCE) {
-
-                        if (sys1.connections.length < MAX_CONN && intermediate.connections.length < MAX_CONN &&
-                            !sys1.connections.includes(intermediate.id) &&
-                            !intermediate.connections.includes(sys1.id)) {
-                            if (!this.wouldConnectionIntersect(sys1, intermediate, systems)) {
-                                sys1.connections.push(intermediate.id);
-                                intermediate.connections.push(sys1.id);
-                            }
-                        }
-
-                        if (sys2.connections.length < MAX_CONN && intermediate.connections.length < MAX_CONN &&
-                            !sys2.connections.includes(intermediate.id) &&
-                            !intermediate.connections.includes(sys2.id)) {
-                            if (!this.wouldConnectionIntersect(sys2, intermediate, systems)) {
-                                sys2.connections.push(intermediate.id);
-                                intermediate.connections.push(sys2.id);
-                                routedThrough = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (routedThrough) continue;
-            }
-
-            // Skip the direct fallback connection if it violates clearance
-            if (this.routeViolatesClearance(sys1, sys2, systems)) continue;
-
-            if (sys1.connections.length < MAX_CONN && sys2.connections.length < MAX_CONN) {
-                if (!this.wouldConnectionIntersect(sys1, sys2, systems)) {
-                    sys1.connections.push(sys2.id);
-                    sys2.connections.push(sys1.id);
-                }
-            } else if (sys1.connections.length < MAX_CONN) {
-                if (this.replaceConnectionIfBetter(sys2, sys1, systems)) {
-                    sys1.connections.push(sys2.id);
-                }
-            } else if (sys2.connections.length < MAX_CONN) {
-                if (this.replaceConnectionIfBetter(sys1, sys2, systems)) {
-                    sys2.connections.push(sys1.id);
-                }
-            } else {
-                this.replaceConnectionIfBetter(sys1, sys2, systems);
-                this.replaceConnectionIfBetter(sys2, sys1, systems);
-            }
-        }
+        return { systems, routes };
     }
 
-    static replaceConnectionIfBetter(fromSystem, toSystem, systems) {
-        const distToTarget = distance(fromSystem.x, fromSystem.y, toSystem.x, toSystem.y);
+    // Build route metadata for a route whose destination is at `destinationTier`
+    static generateRouteData(destinationTier) {
+        const QUEEN_TIER = CONSTANTS.TREE_QUEEN_TIER;
+        const tierFrac   = destinationTier / QUEEN_TIER;  // 0.0–1.0
 
-        let longestConnIdx = -1;
-        let longestDist = distToTarget;
+        // Fleet strength ramps from 1 to 10 across tiers
+        const base     = CONSTANTS.FLEET_STRENGTH_BASE + Math.floor(tierFrac * (CONSTANTS.FLEET_STRENGTH_MAX - CONSTANTS.FLEET_STRENGTH_BASE));
+        const jitter   = randomInt(-CONSTANTS.FLEET_STRENGTH_JITTER, CONSTANTS.FLEET_STRENGTH_JITTER);
+        const strength = Math.max(1, Math.min(CONSTANTS.FLEET_STRENGTH_MAX, base + jitter));
 
-        for (let i = 0; i < fromSystem.connections.length; i++) {
-            const connId = fromSystem.connections[i];
-            const connSys = systems.find(s => s.id === connId);
-            if (connSys) {
-                const dist = distance(fromSystem.x, fromSystem.y, connSys.x, connSys.y);
-                if (dist > longestDist) {
-                    longestConnIdx = i;
-                    longestDist = dist;
-                }
-            }
-        }
+        // Max encounter slots scale with tier (1 at tier 1, up to ROUTE_MAX_ENCOUNTERS)
+        const maxEncounters = Math.max(1, Math.round(1 + (tierFrac * (CONSTANTS.ROUTE_MAX_ENCOUNTERS - 1))));
 
-        if (longestConnIdx !== -1) {
-            if (!this.wouldConnectionIntersect(fromSystem, toSystem, systems)) {
-                const oldConnId = fromSystem.connections[longestConnIdx];
-                const oldConnSys = systems.find(s => s.id === oldConnId);
+        // Faction weights: humans dominate early, aliens ramp in from tier ALIEN_WEIGHT_START_TIER
+        const alienStart = CONSTANTS.ALIEN_WEIGHT_START_TIER;
+        const alienFrac  = destinationTier >= alienStart
+            ? Math.pow((destinationTier - alienStart) / (QUEEN_TIER - alienStart), 1.4)
+            : 0;
+        const alienWeight = alienFrac * 80;
+        const humanPool   = Math.max(0, 100 - alienWeight);
 
-                fromSystem.connections.splice(longestConnIdx, 1);
-                if (oldConnSys) {
-                    oldConnSys.connections = oldConnSys.connections.filter(id => id !== fromSystem.id);
-                }
+        const factionWeights = {
+            pirates:   humanPool * 0.28,
+            merchants: humanPool * 0.20,
+            police:    humanPool * 0.22,
+            soldiers:  humanPool * 0.10,
+            smugglers: humanPool * 0.20,
+            aliens:    alienWeight,
+        };
 
-                fromSystem.connections.push(toSystem.id);
-                return true;
-            }
-        }
+        // Hazard intensity scales with tier (fed to combat in a future pass)
+        const hazardChance = 0.1 + tierFrac * 0.7;
 
-        return false;
+        const isQueenRoute = destinationTier === QUEEN_TIER;
+
+        return { destinationTier, fleetStrength: strength, maxEncounters, factionWeights, hazardChance, isQueenRoute };
     }
 
-    static verifyGalaxyConstraints(systems) {
-        for (let sys of systems) {
-            if (sys.connections.length < CONSTANTS.MIN_CONNECTIONS_PER_SYSTEM ||
-                sys.connections.length > CONSTANTS.MAX_CONNECTIONS_PER_SYSTEM) {
-                return false;
-            }
-
-            for (let connId of sys.connections) {
-                const connSys = systems.find(s => s.id === connId);
-                if (!connSys) return false;
-
-                const dist = distance(sys.x, sys.y, connSys.x, connSys.y);
-                if (dist < CONSTANTS.MIN_TRAVEL_DISTANCE || dist > CONSTANTS.MAX_TRAVEL_DISTANCE) return false;
-
-                if (!connSys.connections.includes(sys.id)) return false;
-
-                // Hard-fail if any non-endpoint system is within clearance distance of this route
-                if (this.routeViolatesClearance(sys, connSys, systems)) return false;
-            }
+    // Roll encounters for a route at travel time — returns array sorted by _crossT
+    static rollEncountersForRoute(routeData) {
+        if (routeData.isQueenRoute) {
+            return [{
+                faction: 'aliens',
+                isQueenFight: true,
+                isAlien: true,
+                size: 5,
+                fleetStrength: CONSTANTS.FLEET_STRENGTH_MAX,
+                _crossT: 0.5,
+            }];
         }
 
-        for (let i = 0; i < systems.length; i++) {
-            const sys1 = systems[i];
-            if (!sys1.connections) continue;
+        const { fleetStrength, maxEncounters, factionWeights } = routeData;
+        const encounterChance = CONSTANTS.ENCOUNTER_CHANCE_BASE
+            + (fleetStrength / CONSTANTS.FLEET_STRENGTH_MAX) * (CONSTANTS.ENCOUNTER_CHANCE_MAX - CONSTANTS.ENCOUNTER_CHANCE_BASE);
 
-            for (let connId of sys1.connections) {
-                if (connId <= sys1.id) continue;
+        const encounters = [];
+        const span = 0.70;
+        const step = span / maxEncounters;
 
-                const sys2 = systems.find(s => s.id === connId);
-                if (!sys2) continue;
+        for (let i = 0; i < maxEncounters; i++) {
+            if (Math.random() > encounterChance) continue;
 
-                for (let j = 0; j < systems.length; j++) {
-                    const sys3 = systems[j];
-                    if (sys3.id === sys1.id || sys3.id === sys2.id) continue;
-                    if (!sys3.connections) continue;
+            const baseT = 0.15 + step * i + step * 0.1 + Math.random() * step * 0.8;
+            const crossT = Math.min(0.85, Math.max(0.15, baseT));
 
-                    for (let connId2 of sys3.connections) {
-                        if (connId2 <= sys3.id) continue;
-
-                        const sys4 = systems.find(s => s.id === connId2);
-                        if (!sys4 || sys4.id === sys1.id || sys4.id === sys2.id) continue;
-
-                        if (this.doLineSegmentsIntersect(
-                            sys1.x, sys1.y, sys2.x, sys2.y,
-                            sys3.x, sys3.y, sys4.x, sys4.y
-                        )) {
-                            return false;
-                        }
-                    }
-                }
+            // Weighted faction roll
+            const totalWeight = Object.values(factionWeights).reduce((a, b) => a + b, 0);
+            let r = Math.random() * totalWeight;
+            let faction = 'pirates';
+            for (const [f, w] of Object.entries(factionWeights)) {
+                r -= w;
+                if (r <= 0) { faction = f; break; }
             }
+
+            // Fleet size from strength
+            const size = fleetStrength <= 3 ? randomInt(1, 2)
+                       : fleetStrength <= 6 ? randomInt(2, 4)
+                       : randomInt(3, 6);
+
+            encounters.push({ faction, size, fleetStrength, _crossT: crossT });
         }
 
-        return true;
+        return encounters.sort((a, b) => a._crossT - b._crossT);
     }
 
-    static isGalaxyConnected(systems) {
-        if (systems.length < 2) return true;
-
-        const adjacency = new Map();
-        systems.forEach(sys => {
-            adjacency.set(sys.id, sys.connections || []);
-        });
-
-        const visited = new Set();
-        const queue = [systems[0].id];
-        visited.add(systems[0].id);
-
-        while (queue.length > 0) {
-            const currentId = queue.shift();
-            const neighbors = adjacency.get(currentId) || [];
-
-            for (let neighborId of neighbors) {
-                if (!visited.has(neighborId)) {
-                    visited.add(neighborId);
-                    queue.push(neighborId);
-                }
-            }
-        }
-
-        return visited.size === systems.length;
-    }
+    // ── Starting system ──────────────────────────────────────────────────────
 
     static initializeStartingSystem(systems) {
-        const deadEnds = systems.filter(s => (s.connections || []).length === 1);
-        const startingSystem = deadEnds.length > 0
-            ? deadEnds[Math.floor(Math.random() * deadEnds.length)]
-            : systems[0];
-        startingSystem.visited = true;
-        this.revealAdjacentSystems(startingSystem, systems);
-        return startingSystem;
+        const start = systems.find(s => s.tier === 0) || systems[0];
+        start.visited = true;
+        this.revealFromTier(systems, 0);
+        return start;
     }
 
-    static revealAdjacentSystems(system, systems) {
-        system.seen = true;
-        (system.connections || []).forEach(connId => {
-            const adj = systems.find(s => s.id === connId);
-            if (adj) adj.seen = true;
+    // Reveal all systems up to tier `fromTier + 2`
+    static revealFromTier(systems, fromTier) {
+        const revealUpTo = fromTier + 2;
+        systems.forEach(s => {
+            if (s.tier <= revealUpTo) s.seen = true;
         });
+    }
+
+    // ── Travel helpers ───────────────────────────────────────────────────────
+
+    static travelToSystem(fromSystem, toSystem) {
+        toSystem.visited = true;
     }
 
     static getReachableSystems(fromSystem, allSystems) {
-        if (!fromSystem.connections) return [];
-        return allSystems.filter(sys => fromSystem.connections.includes(sys.id));
+        return allSystems.filter(sys => (fromSystem.connections || []).includes(sys.id));
     }
 
-    static travelToSystem(fromSystem, toSystem) {
-        const dist = getDistance(fromSystem, toSystem);
-        toSystem.visited = true;
+    // ── Enemy fleet generation ───────────────────────────────────────────────
 
-        if (dist > CONSTANTS.MAX_TRAVEL_DISTANCE) {
-            return null;
-        }
-
-        const encounterChance = Math.min(dist / CONSTANTS.MAX_TRAVEL_DISTANCE, CONSTANTS.MAX_ENCOUNTER_CHANCE);
-        const hasEncounter = Math.random() < encounterChance;
-
-        return {
-            distance: dist,
-            hasEncounter: hasEncounter,
-            encounterStrength: randomInt(1, 5)
-        };
-    }
-
-    static generateRouteFleets(systems) {
-        const fleets = new Map();
-        const seen = new Set();
-
-        systems.forEach(sys => {
-            sys.connections.forEach(connId => {
-                const key = getRouteKey(sys.id, connId);
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    const count = randomInt(0, CONSTANTS.FLEET_MAX_PER_ROUTE);
-                    if (count > 0) {
-                        fleets.set(key, this.generateEncountersForRoute(count, sys.id, connId));
-                    }
-                }
-            });
-        });
-
-        return fleets;
-    }
-
-    // Returns an array of encounter objects spread along a route.
-    // fromId/toId define the canonical direction for position (0=at fromId, 1=at toId).
-    static generateEncountersForRoute(count, fromId, toId) {
-        const factionIds = CONSTANTS.FACTIONS.filter(f => f.routeSpawn !== false).map(f => f.id);
-        const span = 0.70; // occupies [0.15, 0.85] of the route
-        const step = span / count;
-        const encounters = [];
-        for (let i = 0; i < count; i++) {
-            const basePos = 0.15 + step * i + step * 0.1 + Math.random() * step * 0.8;
-            // Random travel direction — half go fromId→toId, half go toId→fromId
-            const forward = Math.random() < 0.5;
-            encounters.push({
-                position: Math.min(0.85, Math.max(0.15, basePos)),
-                faction: factionIds[Math.floor(Math.random() * factionIds.length)],
-                size: randomInt(CONSTANTS.FLEET_SIZE_MIN, CONSTANTS.FLEET_SIZE_MAX),
-                fromId: forward ? fromId : toId,
-                toId:   forward ? toId   : fromId,
-            });
-        }
-        return encounters;
-    }
-
-    // Generate enemy fleet ships for a given encounter object { faction, size }.
     static generateEnemyFleet(encounter) {
-        const faction = encounter && encounter.faction ? encounter.faction : null;
-        const size    = encounter && encounter.size    ? encounter.size    : (encounter || 1);
+        const faction     = encounter && encounter.faction ? encounter.faction : null;
+        const strength    = encounter && encounter.fleetStrength ? encounter.fleetStrength : 3;
         const factionData = faction ? CONSTANTS.FACTIONS.find(f => f.id === faction) : null;
-        const shipTypes   = factionData ? factionData.shipTypes : null;
-        const fleet = [];
         const factionColor = factionData ? factionData.color : null;
+
+        // Queen fight — fixed fleet
+        if (encounter && encounter.isQueenFight) {
+            const fleet = [];
+            const queen = this.generateShipOfType('Alien Queen');
+            if (factionColor) queen.factionColor = factionColor;
+            fleet.push(queen);
+            for (const type of ['Alien Titan', 'Alien Stalker', 'Alien Ravager', 'Alien Phantom']) {
+                const s = this.generateShipOfType(type);
+                if (factionColor) s.factionColor = factionColor;
+                fleet.push(s);
+            }
+            assignFleetNames(fleet);
+            return fleet;
+        }
+
+        // Tiered ship pool by fleet strength
+        const strengthTier = strength <= 3 ? 'low' : strength <= 6 ? 'mid' : 'high';
+        const pools = CONSTANTS.FACTION_SHIP_POOLS[faction];
+        const pool  = (pools && pools[strengthTier]) || (factionData && factionData.shipTypes) || ['Corvette'];
+
+        const size = encounter && encounter.size ? encounter.size : (strength <= 3 ? randomInt(1, 2) : strength <= 6 ? randomInt(2, 4) : randomInt(3, 6));
+
+        const fleet = [];
         for (let i = 0; i < size; i++) {
-            const ship = shipTypes && shipTypes.length
-                ? SpaceTravel.generateShipOfType(shipTypes[Math.floor(Math.random() * shipTypes.length)])
-                : new Ship(0, 0, false);
+            const type = pool[Math.floor(Math.random() * pool.length)];
+            const ship = this.generateShipOfType(type);
             if (factionColor) ship.factionColor = factionColor;
             fleet.push(ship);
         }

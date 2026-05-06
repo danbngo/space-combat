@@ -5,6 +5,8 @@ class UISystem {
     static currentStationOffer = null;
     static currentModuleOffer = null;
     static selectedOfferIndex = 0;
+    static _travelLoopRunning = false;
+    static _travelStars = null;
 
     static showScreen(screenName) {
         // Hide all screens
@@ -45,15 +47,15 @@ class UISystem {
     // Returns an HTML string of status-effect badges for a ship.
     static renderStatusEffects(ship) {
         const badges = [];
-        if (ship.statusEffect === 'dust')   badges.push('<span class="status-badge status-dusty">Dusty</span>');
-        if (ship.statusEffect === 'ice')    badges.push('<span class="status-badge status-frozen">Frozen</span>');
-        if (ship.statusEffect === 'plasma') badges.push('<span class="status-badge status-overheated">Overheated</span>');
-        if ((ship.blindedTurns || 0) > 0)      badges.push(`<span class="status-badge status-blinded">Blinded (${ship.blindedTurns}t)</span>`);
-        if ((ship.superchargedTurns || 0) > 0) badges.push(`<span class="status-badge" style="background:#aa8800;color:#ffe066;">Supercharged</span>`);
-        if ((ship.berserkTurns || 0) > 0)      badges.push(`<span class="status-badge" style="background:#880088;color:#ff88ff;">Berserk (${ship.berserkTurns}t)</span>`);
-        if ((ship.markedTurns || 0) > 0)       badges.push(`<span class="status-badge" style="background:#883300;color:#ff8800;">Marked (${ship.markedTurns}t)</span>`);
-        if (ship.cloaked)                       badges.push('<span class="status-badge status-cloaked">Cloaked</span>');
-        if (ship.isDrone)                       badges.push(`<span class="status-badge status-drone">Drone (${ship.droneLifetime ?? '?'}t)</span>`);
+        if (ship.statusEffect === 'dust')   badges.push('<span class="status-badge status-dusty" data-tooltip="Asteroid dust in engines — movement speed reduced.">Dusty</span>');
+        if (ship.statusEffect === 'ice')    badges.push('<span class="status-badge status-frozen" data-tooltip="Systems locked in ice — cannot move or act.">Frozen</span>');
+        if (ship.statusEffect === 'plasma') badges.push('<span class="status-badge status-overheated" data-tooltip="Plasma overload — cannot fire lasers.">Overheated</span>');
+        if ((ship.blindedTurns || 0) > 0)      badges.push(`<span class="status-badge status-blinded" data-tooltip="Flash-blinded — cannot fire for ${ship.blindedTurns} more turn${ship.blindedTurns !== 1 ? 's' : ''}.">Blinded (${ship.blindedTurns}t)</span>`);
+        if ((ship.superchargedTurns || 0) > 0) badges.push(`<span class="status-badge" style="background:#aa8800;color:#ffe066;" data-tooltip="Supercharged — 2x move range, laser damage, and laser range for ${ship.superchargedTurns} more turn${ship.superchargedTurns !== 1 ? 's' : ''}.">Supercharged</span>`);
+        if ((ship.berserkTurns || 0) > 0)      badges.push(`<span class="status-badge" style="background:#880088;color:#ff88ff;" data-tooltip="Hacked and berserk — randomly attacks any nearby ship for ${ship.berserkTurns} more turn${ship.berserkTurns !== 1 ? 's' : ''}.">Berserk (${ship.berserkTurns}t)</span>`);
+        if ((ship.markedTurns || 0) > 0)       badges.push(`<span class="status-badge" style="background:#883300;color:#ff8800;" data-tooltip="Marked target — all laser shots auto-hit for ${ship.markedTurns} more turn${ship.markedTurns !== 1 ? 's' : ''}.">Marked (${ship.markedTurns}t)</span>`);
+        if (ship.cloaked)                       badges.push('<span class="status-badge status-cloaked" data-tooltip="Cloaked — invisible to lasers and ramming. Revealed by damage or using an ability.">Cloaked</span>');
+        if (ship.isDrone)                       badges.push(`<span class="status-badge status-drone" data-tooltip="Combat drone — acts independently each turn, expires after ${ship.droneLifetime ?? '?'} more turn${(ship.droneLifetime ?? 0) !== 1 ? 's' : ''}.">Drone (${ship.droneLifetime ?? '?'}t)</span>`);
         if (!badges.length) return '';
         return `<div class="status-effects-row">${badges.join('')}</div>`;
     }
@@ -68,7 +70,7 @@ class UISystem {
     static renderShipTable(ships, options = {}) {
         const { selectable = false, showStats = false, selectedShip = null, bars = true, isEnemy = false } = options;
 
-        const extraHeaders = showStats ? '<th>LZR</th><th>ENG</th><th>RDR</th>' : '';
+        const extraHeaders = showStats ? '<th data-tooltip-title="Laser" data-tooltip-body="Base damage per shot. Scales laser range.">LZR</th><th data-tooltip-title="Engine" data-tooltip-body="Movement range per action and ram damage.">ENG</th><th data-tooltip-title="Radar" data-tooltip-body="Shot accuracy and maximum firing range.">RDR</th>' : '';
 
         const rows = ships.map((ship, i) => {
             const hullPct = ship.hull / ship.maxHull;
@@ -112,7 +114,7 @@ class UISystem {
         }).join('');
 
         return `<table class="ship-status-table">
-            <thead><tr><th>Ship</th><th>Hull</th><th>Shield</th>${extraHeaders}</tr></thead>
+            <thead><tr><th>Ship</th><th data-tooltip-title="Hull" data-tooltip-body="Hit points — ship is destroyed at 0.">Hull</th><th data-tooltip-title="Shields" data-tooltip-body="Absorb damage before hull. Recharge by skipping a turn.">Shield</th>${extraHeaders}</tr></thead>
             <tbody>${rows}</tbody>
         </table>`;
     }
@@ -138,7 +140,7 @@ class UISystem {
             </tr>`;
         }).join('');
         return `<table class="ship-status-table">
-            <thead><tr><th>Ship</th><th>Hull</th><th>Shield</th><th>LZR</th><th>ENG</th><th>RDR</th><th>Cost</th><th>Net</th></tr></thead>
+            <thead><tr><th>Ship</th><th data-tooltip-title="Hull" data-tooltip-body="Hit points — ship is destroyed at 0.">Hull</th><th data-tooltip-title="Shields" data-tooltip-body="Absorb damage before hull. Recharge by skipping a turn.">Shield</th><th data-tooltip-title="Laser" data-tooltip-body="Base damage per shot. Scales laser range.">LZR</th><th data-tooltip-title="Engine" data-tooltip-body="Movement range per action and ram damage.">ENG</th><th data-tooltip-title="Radar" data-tooltip-body="Shot accuracy and maximum firing range.">RDR</th><th>Cost</th><th data-tooltip="Net cost after trading in your selected ship.">Net</th></tr></thead>
             <tbody>${rows}</tbody>
         </table>`;
     }
@@ -183,15 +185,6 @@ class UISystem {
             currentActions.innerHTML = '';
             return;
         }
-        const isAlienCapital = gameState.alienCapitalId !== null && gameState.alienCapitalId !== undefined
-            && gameState.currentSystem.id === gameState.alienCapitalId;
-
-        if (isAlienCapital) {
-            currentActions.innerHTML = `<button id="fightQueenButton" class="btn-primary" style="background:#cc4400;border-color:#cc4400;">Fight the Alien Queen</button>`;
-            document.getElementById('fightQueenButton').onclick = () => GameController.fightAlienQueen();
-            return;
-        }
-
         currentActions.innerHTML = `<button id="showSystemButton" class="btn-primary">Show System</button>`;
         this.setupCurrentSystemButtons(gameState);
     }
@@ -263,23 +256,19 @@ class UISystem {
         if (sys.visited) {
             const connections = sys.connections.map(id => {
                 const connected = gameState.systems.find(s => s.id === id);
-                if (!connected) return null;
-                const routeKey = getRouteKey(sys.id, id);
-                const encounters = gameState.routeFleets && gameState.routeFleets.get(routeKey);
-                if (encounters && encounters.length > 0) {
-                    const summary = encounters.map(e => {
-                        const f = CONSTANTS.FACTIONS.find(f => f.id === e.faction);
-                        return `${f ? f.name : '?'}(${e.size})`;
-                    }).join(', ');
-                    return `${connected.name} [${summary}]`;
-                }
-                return connected.name;
+                return connected ? connected.name : null;
             }).filter(Boolean).join(', ') || 'None';
+            const venues = [];
+            if (sys.hasRepair)     venues.push('Dock');
+            if (sys.hasShipyard)   venues.push('Shipyard');
+            if (sys.hasMechanic)   venues.push('Mechanic');
+            if (sys.hasCourthouse) venues.push('Courthouse');
             content.innerHTML = `
                 <div class="station-section">
                     <p><strong>Status:</strong> Visited</p>
-                    <p><strong>Connected systems:</strong> ${connections}</p>
-                    <p><strong>Resource level:</strong> ${sys.resourceLevel}</p>
+                    <p><strong>Tier:</strong> ${sys.tier}</p>
+                    <p><strong>Routes forward:</strong> ${connections}</p>
+                    <p><strong>Venues:</strong> ${venues.join(', ') || 'None'}</p>
                 </div>`;
         } else {
             content.innerHTML = `
@@ -297,6 +286,246 @@ class UISystem {
                 this.showScreen('galaxyScreen');
                 this.updateGalaxyScreen(gameState);
             };
+        }
+    }
+
+    static showTravelScreen(gameState, fromSystem, toSystem, routeData, encounters) {
+        this.showScreen('travelScreen');
+
+        const tierLabel = toSystem.isQueenPlanet ? 'Alien Queen\'s Lair' : `Tier ${toSystem.tier}`;
+        document.getElementById('travelHeader').textContent = `Traveling to ${toSystem.name}`;
+        document.getElementById('travelSubheader').textContent = tierLabel;
+        document.getElementById('travelOriginLabel').textContent = fromSystem.name;
+        document.getElementById('travelDestLabel').textContent = toSystem.name;
+
+        const panel = document.getElementById('travelPlayerPanel');
+        if (panel) panel.innerHTML = this.renderPlayerStatusHtml(gameState, { showStats: true });
+
+        // Encounter markers
+        const markersEl = document.getElementById('travelEncounterMarkers');
+        if (markersEl) {
+            markersEl.innerHTML = (encounters || []).map(enc => {
+                const fd = CONSTANTS.FACTIONS.find(f => f.id === enc.faction);
+                const color = fd ? fd.color : '#ffffff';
+                const tipText = fd ? `${fd.name} encounter (${enc.size} ships)` : 'Unknown encounter';
+                return `<div class="travel-encounter-marker" style="left:${enc._crossT * 100}%;border-color:${color};color:${color};" data-tooltip="${tipText}">!</div>`;
+            }).join('');
+        }
+
+        // Route info
+        const info = document.getElementById('travelRouteInfo');
+        if (info && routeData) {
+            const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
+            const topFactions = Object.entries(routeData.factionWeights)
+                .filter(([, w]) => w > 5).sort(([, a], [, b]) => b - a).slice(0, 3)
+                .map(([id, w]) => {
+                    const fd = CONSTANTS.FACTIONS.find(f => f.id === id);
+                    return `<span style="color:${fd ? fd.color : '#fff'};">${fd ? fd.name : id} ${Math.round(w)}%</span>`;
+                }).join(' &nbsp;·&nbsp; ');
+            const encCount = (encounters || []).length;
+            info.innerHTML = `Threat: <strong>${strLabel}</strong> (${routeData.fleetStrength}/10) &nbsp;·&nbsp; ${encCount} encounter${encCount !== 1 ? 's' : ''} on this route<br>${topFactions}`;
+        } else if (info) {
+            info.textContent = '';
+        }
+
+        const currentProgress = (typeof galaxyRenderer !== 'undefined' && galaxyRenderer && galaxyRenderer._travelAnim)
+            ? galaxyRenderer._travelAnim.progress : 0;
+        this.updateTravelProgress(currentProgress);
+        this.startTravelLoop();
+    }
+
+    static updateTravelProgress(progress) {
+        const pct = Math.round(progress * 100);
+        const fill = document.getElementById('travelProgressFill');
+        if (fill) fill.style.width = pct + '%';
+        const ship = document.getElementById('travelShipMarker');
+        if (ship) ship.style.left = pct + '%';
+        const label = document.getElementById('travelProgressPct');
+        if (label) label.textContent = pct + '%';
+    }
+
+    static startTravelLoop() {
+        if (this._travelLoopRunning) return;
+        this._travelLoopRunning = true;
+        const tick = () => {
+            if (!this._travelLoopRunning || typeof gameState === 'undefined' || gameState.state !== GAME_STATE.TRAVEL) {
+                this._travelLoopRunning = false;
+                return;
+            }
+            this._renderTravelCanvas();
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }
+
+    static _renderTravelCanvas() {
+        const canvas = document.getElementById('travelCanvas');
+        if (!canvas) return;
+
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+        if (canvas.width !== Math.round(rect.width) || canvas.height !== Math.round(rect.height)) {
+            canvas.width  = Math.round(rect.width);
+            canvas.height = Math.round(rect.height);
+            this._travelStars = null; // regenerate for new size
+        }
+        if (!this._travelStars) {
+            this._travelStars = Array.from({ length: 200 }, () => ({
+                x: Math.random(), y: Math.random(),
+                b: Math.floor(140 + Math.random() * 116),
+            }));
+        }
+
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // Starry background
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, w, h);
+        this._travelStars.forEach(s => {
+            ctx.fillStyle = `rgb(${s.b},${s.b},${s.b})`;
+            ctx.fillRect(Math.round(s.x * w), Math.round(s.y * h), 1, 1);
+        });
+        ctx.strokeStyle = '#334466';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0, 0, w, h);
+
+        const progress = (typeof galaxyRenderer !== 'undefined' && galaxyRenderer && galaxyRenderer._travelAnim)
+            ? galaxyRenderer._travelAnim.progress : 0;
+        const tss = typeof _travelScreenState !== 'undefined' ? _travelScreenState : null;
+
+        const margin = 72;
+        const trackY = Math.round(h * 0.48);
+        const fromX  = margin;
+        const toX    = w - margin;
+        const shipX  = fromX + (toX - fromX) * progress;
+
+        // Dashed route line
+        ctx.strokeStyle = '#1a2a3a';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 9]);
+        ctx.beginPath();
+        ctx.moveTo(fromX, trackY);
+        ctx.lineTo(toX, trackY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Traveled portion glow
+        if (progress > 0.005) {
+            const grad = ctx.createLinearGradient(fromX, 0, shipX, 0);
+            grad.addColorStop(0, 'rgba(0,200,80,0.04)');
+            grad.addColorStop(1, 'rgba(0,255,120,0.18)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(fromX, trackY - 2, shipX - fromX, 4);
+        }
+
+        // Origin system
+        ctx.fillStyle = '#00ff00';
+        ctx.beginPath();
+        ctx.arc(fromX, trackY, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Destination system
+        const isQueen = tss && tss.to && tss.to.isQueenPlanet;
+        ctx.fillStyle = isQueen ? '#ff4400' : '#888';
+        ctx.beginPath();
+        ctx.arc(toX, trackY, 8, 0, Math.PI * 2);
+        ctx.fill();
+        if (isQueen) {
+            const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 380);
+            ctx.strokeStyle = `rgba(255,68,0,${pulse})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(toX, trackY, 14, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // System name labels
+        const labelY = trackY + 26;
+        ctx.font = '11px Courier New';
+        ctx.textAlign = 'center';
+        if (tss) {
+            ctx.fillStyle = '#888';
+            ctx.fillText(tss.from.name, fromX, labelY);
+            ctx.fillStyle = isQueen ? '#ff8844' : '#bbb';
+            ctx.fillText(tss.to.name, toX, labelY);
+        }
+        ctx.textAlign = 'left';
+
+        // Exhaust trail
+        if (progress > 0.01) {
+            const trailLen = Math.min(100, (shipX - fromX) * 0.55);
+            const exGrad = ctx.createLinearGradient(shipX - trailLen, 0, shipX, 0);
+            exGrad.addColorStop(0, 'rgba(0,255,136,0)');
+            exGrad.addColorStop(1, 'rgba(0,255,136,0.22)');
+            ctx.fillStyle = exGrad;
+            ctx.fillRect(shipX - trailLen, trackY - 4, trailLen, 8);
+        }
+
+        // Ship sprite / polygon
+        const leaderShip = typeof gameState !== 'undefined'
+            ? gameState.playerShips.find(s => s.alive) : null;
+        const typeData = leaderShip
+            ? CONSTANTS.SHIP_TYPES.find(t => t.type === leaderShip.shipType) : null;
+        const verts    = typeData ? typeData.vertices
+            : [[2.2, 0], [0.2, -1.0], [-0.6, -1.4], [-1.2, -0.4], [-1.2, 0.4], [-0.6, 1.4], [0.2, 1.0]];
+        const spriteId  = leaderShip ? leaderShip.shipType.toLowerCase().replace(/ /g, '_') : null;
+        const spriteImg = (typeof spriteSystem !== 'undefined' && spriteId)
+            ? spriteSystem.getImage(spriteId) : null;
+        const sizeMult  = typeData?.sizeMult ?? 1;
+        const S         = 20 * sizeMult;
+
+        ctx.save();
+        ctx.translate(shipX, trackY);
+        if (spriteImg) {
+            const sw = S * 5;
+            ctx.rotate(Math.PI / 2);
+            ctx.drawImage(spriteImg, -sw / 2, -sw / 2, sw, sw);
+        } else {
+            ctx.fillStyle = '#cccccc';
+            drawShipShape(ctx, verts, S);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    static updateSelectedRouteSection(gameState, route) {
+        const section = document.getElementById('selectedRouteSection');
+        if (!section) return;
+        if (!route) { section.style.display = 'none'; return; }
+
+        section.style.display = '';
+        const routeData = gameState.routes ? gameState.routes.get(route.routeKey) : null;
+        document.getElementById('selectedRouteName').textContent = `${route.from.name} → ${route.to.name}`;
+
+        const info = document.getElementById('selectedRouteInfo');
+        if (info && routeData) {
+            const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
+            const tierLabel = route.to.isQueenPlanet ? 'Alien Queen\'s Lair' : `Tier ${route.to.tier}`;
+            const factionRows = Object.entries(routeData.factionWeights)
+                .filter(([, w]) => w > 5).sort(([, a], [, b]) => b - a).slice(0, 4)
+                .map(([id, w]) => {
+                    const fd = CONSTANTS.FACTIONS.find(f => f.id === id);
+                    return `<span style="color:${fd ? fd.color : '#fff'};">${fd ? fd.name : id}: ${Math.round(w)}%</span>`;
+                }).join('<br>');
+            info.innerHTML = `<p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">${tierLabel} · Threat: ${strLabel} (${routeData.fleetStrength}/10)</p>
+                <p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">Up to ${routeData.maxEncounters} encounter${routeData.maxEncounters !== 1 ? 's' : ''}</p>
+                <p style="font-size:0.85em;margin:0.4em 0 0;">Factions:<br>${factionRows}</p>`;
+        } else if (info) {
+            info.innerHTML = '<p style="color:#555;font-size:0.85em;">No route data.</p>';
+        }
+
+        const actions = document.getElementById('selectedRouteActions');
+        if (actions) {
+            const isPlayerRoute = gameState.currentSystem
+                && gameState.currentSystem.id === route.from.id
+                && gameState.currentSystem.connections.includes(route.to.id);
+            actions.innerHTML = isPlayerRoute
+                ? `<button id="travelRouteBtn" class="btn-primary">Travel</button>`
+                : '';
+            const btn = document.getElementById('travelRouteBtn');
+            if (btn) btn.onclick = () => GameController.travelToSystem(route.to);
         }
     }
 
@@ -357,6 +586,26 @@ class UISystem {
             });
         }
 
+        // Venue availability — gate tabs on current system flags
+        const sys = gameState.currentSystem;
+        const hasShipyard   = sys && sys.hasShipyard;
+        const hasMechanic   = sys && sys.hasMechanic;
+        const hasCourthouse = sys && sys.hasCourthouse;
+
+        const shipyardTab   = document.getElementById('shipyardTab');
+        const modulesTab    = document.getElementById('modulesTab');
+        const courthouseTab = document.getElementById('courthouseTab');
+        if (shipyardTab)   { shipyardTab.style.display   = hasShipyard   ? '' : 'none'; shipyardTab.textContent   = 'Shipyard'; }
+        if (modulesTab)    { modulesTab.style.display    = hasMechanic   ? '' : 'none'; modulesTab.textContent    = 'Mechanic'; }
+        if (courthouseTab) { courthouseTab.style.display = hasCourthouse ? '' : 'none'; courthouseTab.textContent = 'Courthouse'; }
+
+        // If current tab is now hidden, fall back to orbit
+        if ((this.stationTab === 'shipyard'   && !hasShipyard)  ||
+            (this.stationTab === 'modules'    && !hasMechanic)  ||
+            (this.stationTab === 'courthouse' && !hasCourthouse)) {
+            this.stationTab = 'orbit';
+        }
+
         document.querySelectorAll('.station-tab-button').forEach(btn => {
             btn.classList.toggle('active', btn.id === `${this.stationTab}Tab`);
         });
@@ -379,7 +628,7 @@ class UISystem {
             const builtinList = currentShip && (currentShip.builtinModules || []).length > 0
                 ? currentShip.builtinModules.map(id => {
                     const m = CONSTANTS.MODULES.find(m => m.id === id);
-                    return m ? m.name : id;
+                    return m ? `<span style="color:#cc99ff;" data-tooltip="${m.desc}">${m.name}</span>` : id;
                   }).join(', ')
                 : null;
             contentHtml = `
@@ -412,7 +661,7 @@ class UISystem {
             const builtinSummary = builtinIds.length > 0
                 ? builtinIds.map(id => {
                     const m = CONSTANTS.MODULES.find(m => m.id === id);
-                    return m ? `<span style="color:#cc99ff;background:#1a0033;padding:1px 6px;border-radius:3px;margin-right:4px;">${m.name}</span>` : id;
+                    return m ? `<span style="color:#cc99ff;background:#1a0033;padding:1px 6px;border-radius:3px;margin-right:4px;cursor:help;" data-tooltip="${m.desc}">${m.name}</span>` : id;
                   }).join('')
                 : '<span style="color:#555;">None</span>';
 
@@ -882,15 +1131,18 @@ class UISystem {
                         const btnDis = onCd || !hasActions || isAnimating || overheated || cloakBlocked || flashBlocked ? 'disabled' : '';
                         const label  = onCd ? `${moveDef.name} (${cd})` : moveDef.name;
                         const color  = onCd || overheated || cloakBlocked || flashBlocked ? '#555' : '#cc99ff';
-                        return `<button class="btn-primary combat-special-btn" ${btnDis} data-move-id="${moveId}" style="color:${color};">${label}</button>`;
+                        return `<button class="btn-primary combat-special-btn" ${btnDis} data-move-id="${moveId}" style="color:${color};" data-tooltip="${moveDef.desc}">${label}</button>`;
                     }).join('');
 
+                    const rechargeTooltip = activeTurnShip.maxShields > 0 && activeTurnShip.shields >= activeTurnShip.maxShields
+                        ? 'Pass your turn without acting.'
+                        : 'Skip your turn to recharge shields.';
                     actionsHtml = `
                         <div style="text-align:center;font-size:0.8em;color:#aaa;margin-bottom:0.25em;">Actions: ${activeTurnShip.actionsRemaining}/2</div>
                         <div class="combat-action-row">
-                            <button id="combatMoveBtn" class="btn-primary" ${dis}>Move</button>
-                            <button id="combatFireBtn" class="btn-primary" ${fireDis}>Fire</button>
-                            <button id="combatSkipBtn" class="btn-secondary" ${dis}>${rechargeLabel}</button>
+                            <button id="combatMoveBtn" class="btn-primary" ${dis} data-tooltip="Move your ship within range, or click an adjacent enemy to ram.">Move</button>
+                            <button id="combatFireBtn" class="btn-primary" ${fireDis} data-tooltip="Fire lasers at an enemy within range and firing arc.">Fire</button>
+                            <button id="combatSkipBtn" class="btn-secondary" ${dis} data-tooltip="${rechargeTooltip}">${rechargeLabel}</button>
                         </div>
                         ${specialBtns ? `<div class="combat-action-row" style="margin-top:0.3em;">${specialBtns}</div>` : ''}`;
                 }
