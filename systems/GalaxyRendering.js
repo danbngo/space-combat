@@ -505,7 +505,7 @@ class GalaxyRenderer {
         let html = `<strong>${route.from.name} → ${route.to.name}</strong><br>${tierLabel}`;
         if (routeData) {
             const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
-            html += `<br>Threat: ${strLabel} (${routeData.fleetStrength}/10) · Up to ${routeData.maxEncounters} encounter${routeData.maxEncounters !== 1 ? 's' : ''}`;
+            html += `<br>Threat: ${strLabel} (${routeData.fleetStrength}/10) · 1–${routeData.maxEncounters} encounters`;
             const topFactions = Object.entries(routeData.factionWeights)
                 .filter(([, w]) => w > 5).sort(([, a], [, b]) => b - a).slice(0, 2);
             if (topFactions.length) {
@@ -555,12 +555,12 @@ class GalaxyRenderer {
         // Highlighted hovered route (yellow) and selected route (orange glow)
         if (this.selectedRoute) {
             this.ctx.shadowBlur = 8;
-            this.ctx.shadowColor = '#ff8844';
-            this.drawConnectionLine(this.selectedRoute.from, this.selectedRoute.to, '#ff8844', 4);
+            this.ctx.shadowColor = '#00ffff';
+            this.drawConnectionLine(this.selectedRoute.from, this.selectedRoute.to, '#00ffff', 4);
             this.ctx.shadowBlur = 0;
         }
         if (this.hoveredRoute && this.hoveredRoute.routeKey !== this.selectedRoute?.routeKey) {
-            this.drawConnectionLine(this.hoveredRoute.from, this.hoveredRoute.to, '#ffee44', 3);
+            this.drawConnectionLine(this.hoveredRoute.from, this.hoveredRoute.to, '#ffffff', 4);
         }
         
         // Draw all systems

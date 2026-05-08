@@ -190,20 +190,26 @@ class Combat {
                 if (dist < minDist) {
                     if (!asteroid._activeCollisions.has(ship.name)) {
                         asteroid._activeCollisions.add(ship.name);
-                        ship.hull = Math.max(0, ship.hull - CONSTANTS.ASTEROID_COLLISION_DAMAGE);
-                        if (ship.hull <= 0) ship.alive = false;
-                        ship.triggerHitFlash(CONSTANTS.ASTEROID_COLLISION_DAMAGE, 0);
-                        this.addFloatingText(`-${CONSTANTS.ASTEROID_COLLISION_DAMAGE}`, '#ff4444', ship.x, ship.y - 8);
-                        this.addLog(`${this._shipLabel(ship)}: hit by asteroid!`);
+                        if (!ship.collisionImmune) {
+                            ship.hull = Math.max(0, ship.hull - CONSTANTS.ASTEROID_COLLISION_DAMAGE);
+                            if (ship.hull <= 0) ship.alive = false;
+                            ship.triggerHitFlash(CONSTANTS.ASTEROID_COLLISION_DAMAGE, 0);
+                            this.addFloatingText(`-${CONSTANTS.ASTEROID_COLLISION_DAMAGE}`, '#ff4444', ship.x, ship.y - 8);
+                            this.addLog(`${this._shipLabel(ship)}: hit by asteroid!`);
+                        } else {
+                            this.addLog(`${this._shipLabel(ship)}: hit by asteroid! (dampened)`);
+                        }
 
                         // Debris pushes away from the originating ship; random asteroids push away from impact point
                         const knockSrcX = asteroid._debrisSourceX !== undefined ? asteroid._debrisSourceX : asteroid.x;
                         const knockSrcY = asteroid._debrisSourceY !== undefined ? asteroid._debrisSourceY : asteroid.y;
                         const ang = Math.atan2(ship.y - knockSrcY, ship.x - knockSrcX);
-                        ship.targetX = ship.x + Math.cos(ang) * CONSTANTS.ASTEROID_KNOCKBACK;
-                        ship.targetY = ship.y + Math.sin(ang) * CONSTANTS.ASTEROID_KNOCKBACK;
-                        ship.isMoving = true;
-                        ship._moveStarted = false;
+                        if ((ship.anchoredTurns || 0) <= 0) {
+                            ship.targetX = ship.x + Math.cos(ang) * CONSTANTS.ASTEROID_KNOCKBACK;
+                            ship.targetY = ship.y + Math.sin(ang) * CONSTANTS.ASTEROID_KNOCKBACK;
+                            ship.isMoving = true;
+                            ship._moveStarted = false;
+                        }
 
                         if (!ship.alive) {
                             this.addAnimation({ type: 'explosion', x: ship.x, y: ship.y, duration: CONSTANTS.EXPLOSION_DURATION });
@@ -232,6 +238,7 @@ class Combat {
         // Accumulate per-ship knockback impulses so multiple overlapping ships get a net push
         const knockbackMap = new Map();
         const addKnockback = (ship, dx, dy) => {
+            if ((ship.anchoredTurns || 0) > 0) return;
             if (!knockbackMap.has(ship)) knockbackMap.set(ship, { dx: 0, dy: 0 });
             const k = knockbackMap.get(ship);
             k.dx += dx;
@@ -259,14 +266,18 @@ class Combat {
                         if (!this._overlapDamagedPairs.has(pairKey)) {
                             this._overlapDamagedPairs.add(pairKey);
                             const dmg = CONSTANTS.ASTEROID_COLLISION_DAMAGE;
-                            a.hull = Math.max(0, a.hull - dmg);
-                            b.hull = Math.max(0, b.hull - dmg);
-                            if (a.hull <= 0 && a.alive) { a.alive = false; newlyDead.push(a); }
-                            if (b.hull <= 0 && b.alive) { b.alive = false; newlyDead.push(b); }
-                            a.triggerHitFlash(dmg, 0);
-                            b.triggerHitFlash(dmg, 0);
-                            this.addFloatingText(`-${dmg}`, '#ff4444', a.x, a.y - 6);
-                            this.addFloatingText(`-${dmg}`, '#ff4444', b.x, b.y - 6);
+                            if (!a.collisionImmune) {
+                                a.hull = Math.max(0, a.hull - dmg);
+                                if (a.hull <= 0 && a.alive) { a.alive = false; newlyDead.push(a); }
+                                a.triggerHitFlash(dmg, 0);
+                                this.addFloatingText(`-${dmg}`, '#ff4444', a.x, a.y - 6);
+                            }
+                            if (!b.collisionImmune) {
+                                b.hull = Math.max(0, b.hull - dmg);
+                                if (b.hull <= 0 && b.alive) { b.alive = false; newlyDead.push(b); }
+                                b.triggerHitFlash(dmg, 0);
+                                this.addFloatingText(`-${dmg}`, '#ff4444', b.x, b.y - 6);
+                            }
                             this.addLog(`${this._shipLabel(a)} ↔ ${this._shipLabel(b)}: collision!`);
                         }
                     }
@@ -301,11 +312,15 @@ class Combat {
                     if (!this._overlapDamagedPairs.has(pairKey)) {
                         this._overlapDamagedPairs.add(pairKey);
                         const dmg = CONSTANTS.ASTEROID_COLLISION_DAMAGE;
-                        ship.hull = Math.max(0, ship.hull - dmg);
-                        if (ship.hull <= 0 && ship.alive) { ship.alive = false; newlyDead.push(ship); }
-                        ship.triggerHitFlash(dmg, 0);
-                        this.addFloatingText(`-${dmg}`, '#ff4444', ship.x, ship.y - 6);
-                        this.addLog(`${this._shipLabel(ship)}: hit asteroid!`);
+                        if (!ship.collisionImmune) {
+                            ship.hull = Math.max(0, ship.hull - dmg);
+                            if (ship.hull <= 0 && ship.alive) { ship.alive = false; newlyDead.push(ship); }
+                            ship.triggerHitFlash(dmg, 0);
+                            this.addFloatingText(`-${dmg}`, '#ff4444', ship.x, ship.y - 6);
+                            this.addLog(`${this._shipLabel(ship)}: hit asteroid!`);
+                        } else {
+                            this.addLog(`${this._shipLabel(ship)}: hit asteroid! (dampened)`);
+                        }
                         asteroidsToSplit.push({ asteroid, ang: Math.atan2(asteroid.y - ship.y, asteroid.x - ship.x) });
                     }
                 }
@@ -418,9 +433,11 @@ class Combat {
         const ang = Math.atan2(asteroid.y - rammer.y, asteroid.x - rammer.x);
         const selfDmg = randomInt(1, Math.max(1, Math.floor(rammer.engine / 2)));
 
-        rammer.hull = Math.max(0, rammer.hull - selfDmg);
-        if (rammer.hull <= 0) rammer.alive = false;
-        rammer.triggerHitFlash(selfDmg, 0);
+        if (!rammer.collisionImmune) {
+            rammer.hull = Math.max(0, rammer.hull - selfDmg);
+            if (rammer.hull <= 0) rammer.alive = false;
+            rammer.triggerHitFlash(selfDmg, 0);
+        }
 
         rammer.targetX = asteroid.x - Math.cos(ang) * (asteroid.radius + CONSTANTS.SHIP_SIZE * 2 * (rammer.sizeMult ?? 1.0));
         rammer.targetY = asteroid.y - Math.sin(ang) * (asteroid.radius + CONSTANTS.SHIP_SIZE * 2 * (rammer.sizeMult ?? 1.0));
@@ -430,8 +447,13 @@ class Combat {
         rammer.actionsRemaining = Math.max(0, rammer.actionsRemaining - 1);
 
         this.addFloatingText('Ram!', '#ff8800', rammer.x, rammer.y - 12);
-        this.addFloatingText(`-${selfDmg}`, '#ff4444', rammer.x, rammer.y - 6);
-        this.addLog(`${this._shipLabel(rammer)}: rammed asteroid (-${selfDmg} self hull)`);
+        if (rammer.collisionImmune) {
+            this.addFloatingText('Nullified!', '#88ff88', rammer.x, rammer.y - 6);
+            this.addLog(`${this._shipLabel(rammer)}: rammed asteroid (dampened)`);
+        } else {
+            this.addFloatingText(`-${selfDmg}`, '#ff4444', rammer.x, rammer.y - 6);
+            this.addLog(`${this._shipLabel(rammer)}: rammed asteroid (-${selfDmg} self hull)`);
+        }
 
         const travelDist = distance(rammer.x, rammer.y, rammer.targetX, rammer.targetY);
         const delay = Math.ceil(travelDist / CONSTANTS.SHIP_ANIMATION_SPEED);
@@ -590,7 +612,7 @@ class Combat {
     }
 
     isAnimating() {
-        if (this.animations.some(a => a.type === 'laser')) return true;
+        if (this.animations.some(a => a.type === 'laser' || a.type === 'chaingunBurst' || a.type === 'plasmaRound')) return true;
         for (const ship of [...this.playerShips, ...this.enemyShips]) {
             if (ship.isMoving) return true;
         }
@@ -667,6 +689,24 @@ class Combat {
             if (this.playerMode === 'mark' && activeTurnShip.actionsRemaining > 0) {
                 renderingSystem.drawMarkRange(activeTurnShip);
             }
+            if (this.playerMode === 'chaingun' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawChaingunRange(activeTurnShip);
+            }
+            if (this.playerMode === 'plasma_cannon' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawPlasmaRange(activeTurnShip);
+            }
+            if (this.playerMode === 'rocket_launcher' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawRocketRange(activeTurnShip);
+                if (renderingSystem.hoveredWorldX !== null) {
+                    renderingSystem.drawRocketCursor(activeTurnShip, renderingSystem.hoveredWorldX, renderingSystem.hoveredWorldY);
+                }
+            }
+            if (this.playerMode === 'anchor' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawAnchorRange(activeTurnShip);
+            }
+            if (this.playerMode === 'siphon' && activeTurnShip.actionsRemaining > 0) {
+                renderingSystem.drawSiphonRange(activeTurnShip);
+            }
         }
 
         let hoveredShip = null;
@@ -702,6 +742,14 @@ class Combat {
                     const inRange = distance(activeTurnShip.x, activeTurnShip.y, asteroid.x, asteroid.y) <= shootRange;
                     const inZone  = isInFiringZone(activeTurnShip, asteroid);
                     astDimmed = !(inRange && inZone);
+                } else if (this.playerMode === 'chaingun') {
+                    const shootRange = this.getShootRange(activeTurnShip);
+                    const inRange = distance(activeTurnShip.x, activeTurnShip.y, asteroid.x, asteroid.y) <= shootRange;
+                    astDimmed = !(inRange && isInFiringZone(activeTurnShip, asteroid));
+                } else if (this.playerMode === 'plasma_cannon') {
+                    const shootRange = this.getShootRange(activeTurnShip) * CONSTANTS.PLASMA_RANGE_MULT;
+                    const inRange = distance(activeTurnShip.x, activeTurnShip.y, asteroid.x, asteroid.y) <= shootRange;
+                    astDimmed = !(inRange && isInFiringZone(activeTurnShip, asteroid));
                 } else if (this.playerMode === 'tractor_beam') {
                     const tractorRange = this.getTractorBeamRange(activeTurnShip);
                     const dist = distance(activeTurnShip.x, activeTurnShip.y, asteroid.x, asteroid.y);
@@ -734,6 +782,14 @@ class Combat {
                     } else if (dimming) {
                         if (this.playerMode === 'fire') {
                             const shootRange = this.getShootRange(activeTurnShip);
+                            const inRange = distance(activeTurnShip.x, activeTurnShip.y, ship.x, ship.y) <= shootRange;
+                            isDimmed = !(inRange && !ship.isPlayer && isInFiringZone(activeTurnShip, ship));
+                        } else if (this.playerMode === 'chaingun') {
+                            const shootRange = this.getShootRange(activeTurnShip);
+                            const inRange = distance(activeTurnShip.x, activeTurnShip.y, ship.x, ship.y) <= shootRange;
+                            isDimmed = !(inRange && !ship.isPlayer && isInFiringZone(activeTurnShip, ship));
+                        } else if (this.playerMode === 'plasma_cannon') {
+                            const shootRange = this.getShootRange(activeTurnShip) * CONSTANTS.PLASMA_RANGE_MULT;
                             const inRange = distance(activeTurnShip.x, activeTurnShip.y, ship.x, ship.y) <= shootRange;
                             isDimmed = !(inRange && !ship.isPlayer && isInFiringZone(activeTurnShip, ship));
                         } else if (this.playerMode === 'move') {
@@ -775,7 +831,7 @@ class Combat {
         this.animations.forEach(anim => {
             if (anim.type === 'laser') {
                 const progress = anim.totalDuration > 0 ? 1 - anim.duration / anim.totalDuration : 1;
-                renderingSystem.drawLaser(anim.from, anim.to, progress);
+                renderingSystem.drawLaser(anim.from, anim.to, progress, anim.color || null);
             } else if (anim.type === 'explosion') {
                 const elapsed = anim.totalDuration - anim.duration;
                 const progress = anim.totalDuration > 0 ? elapsed / anim.totalDuration : 0;
@@ -803,6 +859,16 @@ class Combat {
             } else if (anim.type === 'tractorBeam') {
                 const progress = anim.totalDuration > 0 ? 1 - anim.duration / anim.totalDuration : 1;
                 renderingSystem.drawTractorBeam(anim.from, anim.to, progress);
+            } else if (anim.type === 'chaingunRound') {
+                const progress = anim.totalDuration > 0 ? 1 - anim.duration / anim.totalDuration : 1;
+                renderingSystem.drawChaingunRound(anim.from, anim.to, progress);
+            } else if (anim.type === 'plasmaRound') {
+                const progress = anim.totalDuration > 0 ? 1 - anim.duration / anim.totalDuration : 1;
+                renderingSystem.drawPlasmaRound(anim.from, anim.to, progress);
+            } else if (anim.type === 'rocketBlast') {
+                const elapsed = anim.totalDuration - anim.duration;
+                const progress = anim.totalDuration > 0 ? elapsed / anim.totalDuration : 0;
+                renderingSystem.drawRocketBlast(anim.x, anim.y, progress);
             } else if (anim.type === 'floatingText') {
                 const elapsed = anim.totalDuration - anim.duration;
                 renderingSystem.drawFloatingText(anim.text, anim.color, anim.worldX, anim.worldY, elapsed, anim.totalDuration);
@@ -994,6 +1060,19 @@ class Combat {
                 const dist = distance(active.x, active.y, ship.x, ship.y);
                 const localAng = normalizeAngle(Math.atan2(ship.y - active.y, ship.x - active.x) - active.rotation);
                 return dist <= CONSTANTS.MARK_RANGE && Math.abs(localAng) <= CONSTANTS.MARK_CONE_HALF_ANGLE;
+            } else if (mode === 'chaingun') {
+                if (ship.isPlayer || ship.cloaked) return false;
+                return distance(active.x, active.y, ship.x, ship.y) <= this.getShootRange(active) && isInFiringZone(active, ship);
+            } else if (mode === 'plasma_cannon') {
+                if (ship.isPlayer || ship.cloaked) return false;
+                return distance(active.x, active.y, ship.x, ship.y) <= this.getShootRange(active) * CONSTANTS.PLASMA_RANGE_MULT && isInFiringZone(active, ship);
+            } else if (mode === 'anchor') {
+                if (ship === active || ship.cloaked) return false;
+                const dist = distance(active.x, active.y, ship.x, ship.y);
+                const localAng = normalizeAngle(Math.atan2(ship.y - active.y, ship.x - active.x) - active.rotation);
+                return dist <= CONSTANTS.ANCHOR_RANGE && Math.abs(localAng) <= CONSTANTS.ANCHOR_CONE_HALF_ANGLE;
+            } else if (mode === 'siphon') {
+                return ship !== active && distance(active.x, active.y, ship.x, ship.y) <= CONSTANTS.SIPHON_RANGE;
             }
             return true;
         }
@@ -1038,6 +1117,11 @@ class Combat {
             }
         }
 
+        // Deflector: check before animation — 20% chance to reflect the shot back
+        if (result.hit && !result._dustMiss && (target.projectileReflectChance || 0) > 0 && Math.random() < target.projectileReflectChance) {
+            result._reflected = true;
+        }
+
         const obstruction = this.getPathObstructions(shooter, target);
         const laserEnd = obstruction ? obstruction.entity : target;
 
@@ -1047,7 +1131,8 @@ class Combat {
             from: { x: shooter.x, y: shooter.y },
             to:   { x: laserEnd.x, y: laserEnd.y },
             duration: CONSTANTS.COMBAT_ANIMATION_SPEED,
-            totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED
+            totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED,
+            color: shooter.hasRepulsor ? 'repulsor' : null,
         });
 
         const self = this;
@@ -1057,6 +1142,21 @@ class Combat {
             setTimeout(() => {
                 self.addFloatingText('Missed!', '#555555', target.x, target.y - 6);
                 self._applyLaserHitToObstruction(shooter, obstruction, target);
+            }, delay);
+        } else if (result._reflected) {
+            setTimeout(() => {
+                self.addFloatingText('Reflected!', '#88ffff', target.x, target.y - 16);
+                const shieldAbsorb = Math.min(result.damage, shooter.shields);
+                const hullDmg = result.damage - shieldAbsorb;
+                shooter.takeDamage(result.damage, true);
+                shooter.triggerHitFlash(hullDmg, shieldAbsorb);
+                if (shieldAbsorb > 0) self.addFloatingText(`-${shieldAbsorb}`, '#4488ff', shooter.x, shooter.y - 20);
+                if (hullDmg > 0)      self.addFloatingText(`-${hullDmg}`,      '#ff4444', shooter.x, shooter.y - 6);
+                self.addLog(`${self._shipLabel(target)}: deflected shot! ${self._shipLabel(shooter)} takes -${result.damage}`);
+                if (!shooter.alive) {
+                    self.addAnimation({ type: 'explosion', x: shooter.x, y: shooter.y, duration: CONSTANTS.EXPLOSION_DURATION });
+                    self.addLog(`${self._shipLabel(shooter)} destroyed!`);
+                }
             }, delay);
         } else if (result.hit) {
             const shieldAbsorb = Math.min(result.damage, target.shields);
@@ -1075,6 +1175,16 @@ class Combat {
                 if (!target.alive) {
                     self.addAnimation({ type: 'explosion', x: target.x, y: target.y, duration: CONSTANTS.EXPLOSION_DURATION });
                     self.addLog(`${self._shipLabel(target)} destroyed!`);
+                }
+                // Repulsor: small knockback on hit (blocked if target is anchored)
+                if (shooter.hasRepulsor && (target.anchoredTurns || 0) <= 0) {
+                    const ang = Math.atan2(target.y - shooter.y, target.x - shooter.x);
+                    target.targetX = target.x + Math.cos(ang) * CONSTANTS.REPULSOR_KNOCKBACK;
+                    target.targetY = target.y + Math.sin(ang) * CONSTANTS.REPULSOR_KNOCKBACK;
+                    target._moveDuration = 300;
+                    target._moveElapsed  = 0;
+                    target._moveStarted  = false;
+                    target.isMoving = true;
                 }
             }, delay);
         } else {
@@ -1124,6 +1234,144 @@ class Combat {
                 this.addLog(`${this._shipLabel(blocker)} destroyed!`);
             }
         }
+    }
+
+    playerChaingun(shooter, target) {
+        if (shooter.statusEffect === 'plasma') { this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`); return; }
+        if (shooter.blindedTurns > 0)           { this.addLog(`${this._shipLabel(shooter)}: cannot fire — blinded!`);   return; }
+        shooter.decloak();
+
+        const maxRange  = this.getShootRange(shooter);
+        const perRound  = Math.max(1, Math.round(shooter.laserDamage * CONSTANTS.CHAINGUN_DAMAGE_MULT / CONSTANTS.CHAINGUN_ROUNDS));
+        const dist      = distance(shooter.x, shooter.y, target.x, target.y);
+        const hitChance = 1 - (Math.min(1, dist / maxRange) * 0.5);
+        const roundDur  = Math.round(CONSTANTS.COMBAT_ANIMATION_SPEED * 0.55);
+        const stagger   = 85;
+        const burstDur  = (CONSTANTS.CHAINGUN_ROUNDS - 1) * stagger + roundDur + 20;
+
+        this.addAnimation({ type: 'chaingunBurst', duration: burstDur, totalDuration: burstDur });
+        this.addFloatingText('Chaingun!', '#ff8800', shooter.x, shooter.y - 12);
+        this.addLog(`${this._shipLabel(shooter)} → ${this._shipLabel(target)}: Chaingun (${CONSTANTS.CHAINGUN_ROUNDS} rounds)`);
+
+        const self = this;
+        for (let i = 0; i < CONSTANTS.CHAINGUN_ROUNDS; i++) {
+            const yOff = 6 + i * 7;
+            setTimeout(() => {
+                self.addAnimation({ type: 'chaingunRound', from: { x: shooter.x, y: shooter.y }, to: { x: target.x, y: target.y }, duration: roundDur, totalDuration: roundDur });
+                setTimeout(() => {
+                    if (!target.alive) return;
+                    if (Math.random() < hitChance) {
+                        target.hull = Math.max(0, target.hull - perRound);
+                        if (target.hull <= 0) target.alive = false;
+                        target._hullFlashStart = Date.now();
+                        target._hullFlashPct   = Math.min(1, (target.hull + perRound) / target.maxHull);
+                        self.addFloatingText(`-${perRound}`, '#ff8800', target.x + randomInt(-4, 4), target.y - yOff);
+                        if (!target.alive) {
+                            self.addAnimation({ type: 'explosion', x: target.x, y: target.y, duration: CONSTANTS.EXPLOSION_DURATION, totalDuration: CONSTANTS.EXPLOSION_DURATION });
+                            self.addLog(`${self._shipLabel(target)} destroyed!`);
+                        }
+                    } else {
+                        self.addFloatingText('Miss!', '#555555', target.x + randomInt(-4, 4), target.y - yOff);
+                    }
+                }, roundDur);
+            }, i * stagger);
+        }
+
+        shooter.actionsRemaining = Math.max(0, shooter.actionsRemaining - 1);
+        shooter.specialMoveCooldowns['chaingun'] = CONSTANTS.SPECIAL_MOVES.chaingun.cooldown;
+        this.playerMode = null;
+        this.checkAutoAdvance(shooter);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    playerPlasmaCannon(shooter, target) {
+        if (shooter.statusEffect === 'plasma') { this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`); return; }
+        if (shooter.blindedTurns > 0)           { this.addLog(`${this._shipLabel(shooter)}: cannot fire — blinded!`);   return; }
+        shooter.decloak();
+
+        const maxRange    = this.getShootRange(shooter) * CONSTANTS.PLASMA_RANGE_MULT;
+        const targetMarked = (target.markedTurns || 0) > 0;
+        const dist        = distance(shooter.x, shooter.y, target.x, target.y);
+        const hitChance   = targetMarked ? 1 : 1 - (Math.min(1, dist / maxRange) * 0.5);
+        const animDur     = Math.round(CONSTANTS.COMBAT_ANIMATION_SPEED * 1.8);
+
+        this.addFloatingText('Plasma!', '#88ffaa', shooter.x, shooter.y - 12);
+        this.addAnimation({ type: 'plasmaRound', from: { x: shooter.x, y: shooter.y }, to: { x: target.x, y: target.y }, duration: animDur, totalDuration: animDur });
+
+        const self = this;
+        setTimeout(() => {
+            if (!target.alive) return;
+            if (Math.random() >= hitChance) {
+                self.addFloatingText('Miss!', '#555555', target.x, target.y - 6);
+                self.addLog(`${self._shipLabel(shooter)} → ${self._shipLabel(target)}: plasma miss`);
+                return;
+            }
+            const dmg        = shooter.laserDamage;
+            const shieldDrain = Math.round(Math.min(target.shields, dmg * CONSTANTS.PLASMA_SHIELD_MULT));
+            const hullDmg    = Math.max(0, Math.round(dmg - shieldDrain / CONSTANTS.PLASMA_SHIELD_MULT));
+            target.shields   = Math.max(0, target.shields - shieldDrain);
+            target.hull      = Math.max(0, target.hull - hullDmg);
+            if (target.hull <= 0) target.alive = false;
+            target.triggerHitFlash(hullDmg, shieldDrain);
+            if (shieldDrain > 0) self.addFloatingText(`-${shieldDrain}`, '#44ff88', target.x, target.y - 20);
+            if (hullDmg > 0)     self.addFloatingText(`-${hullDmg}`,     '#ff4444', target.x, target.y - 6);
+            const parts = [];
+            if (shieldDrain > 0) parts.push(`${shieldDrain} shld`);
+            if (hullDmg > 0)     parts.push(`${hullDmg} hull`);
+            self.addLog(`${self._shipLabel(shooter)} → ${self._shipLabel(target)}: plasma -${parts.join(' -')}`);
+            if (!target.alive) {
+                self.addAnimation({ type: 'explosion', x: target.x, y: target.y, duration: CONSTANTS.EXPLOSION_DURATION, totalDuration: CONSTANTS.EXPLOSION_DURATION });
+                self.addLog(`${self._shipLabel(target)} destroyed!`);
+            }
+        }, animDur);
+
+        shooter.actionsRemaining = Math.max(0, shooter.actionsRemaining - 1);
+        shooter.specialMoveCooldowns['plasma_cannon'] = CONSTANTS.SPECIAL_MOVES.plasma_cannon.cooldown;
+        this.playerMode = null;
+        this.checkAutoAdvance(shooter);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    playerRocketLauncher(shooter, tx, ty) {
+        shooter.decloak();
+
+        const blastRadius = CONSTANTS.ROCKET_BLAST_RADIUS;
+        const allShips    = [...this.playerShips, ...this.enemyShips];
+        const inBlast     = allShips.filter(s => s !== shooter && s.alive && distance(s.x, s.y, tx, ty) <= blastRadius);
+
+        shooter.actionsRemaining = Math.max(0, shooter.actionsRemaining - 1);
+        shooter.specialMoveCooldowns['rocket_launcher'] = CONSTANTS.SPECIAL_MOVES.rocket_launcher.cooldown;
+        this.playerMode = null;
+
+        this.addFloatingText('Rockets!', '#ff6633', shooter.x, shooter.y - 12);
+        this.addLog(`${this._shipLabel(shooter)}: Rocket!`);
+
+        const blastDur = 600;
+        this.addAnimation({ type: 'rocketBlast', x: tx, y: ty, duration: blastDur, totalDuration: blastDur });
+
+        const self = this;
+        setTimeout(() => {
+            inBlast.forEach(target => {
+                if (!target.alive) return;
+                const dmg = Math.max(1, shooter.laserDamage + randomInt(-2, 2));
+                const { shieldAbsorb, hullDmg } = target.takeDamage(dmg, false);
+                target.triggerHitFlash(hullDmg, shieldAbsorb);
+                if (shieldAbsorb > 0) self.addFloatingText(`-${shieldAbsorb}`, '#4488ff', target.x, target.y - 20);
+                if (hullDmg > 0)      self.addFloatingText(`-${hullDmg}`,      '#ff4444', target.x, target.y - 6);
+                const parts = [];
+                if (shieldAbsorb > 0) parts.push(`${shieldAbsorb} shld`);
+                if (hullDmg > 0)      parts.push(`${hullDmg} hull`);
+                self.addLog(`${self._shipLabel(shooter)} rocket → ${self._shipLabel(target)}: -${parts.join(' -')}`);
+                if (!target.alive) {
+                    self.addAnimation({ type: 'explosion', x: target.x, y: target.y, duration: CONSTANTS.EXPLOSION_DURATION, totalDuration: CONSTANTS.EXPLOSION_DURATION });
+                    self.addLog(`${self._shipLabel(target)} destroyed!`);
+                }
+            });
+            if (inBlast.length === 0) self.addLog(`${self._shipLabel(shooter)} rocket: no ships in blast`);
+        }, blastDur * 0.35);
+
+        this.checkAutoAdvance(shooter);
+        UISystem.updateCombatScreen(gameState, this);
     }
 
     playerSkipTurn(ship) {
@@ -1440,9 +1688,10 @@ class Combat {
     getRepairBeamConeTargets(ship) {
         const range = this.getRepairBeamRange(ship);
         const halfAngle = CONSTANTS.REPAIR_BEAM_CONE_HALF_ANGLE;
-        const allies = ship.isPlayer ? this.playerShips : this.enemyShips;
-        return allies.filter(s => {
-            if (s === ship || !s.alive || s.isBomb) return false;
+        const allShips = [...this.playerShips, ...this.enemyShips];
+        return allShips.filter(s => {
+            if (s === ship || s.isBomb) return false;
+            // Include dead ships (for resurrection) and living ships (for healing)
             const dist = distance(ship.x, ship.y, s.x, s.y);
             if (dist > range) return false;
             const ang = Math.atan2(s.y - ship.y, s.x - ship.x);
@@ -1462,14 +1711,23 @@ class Combat {
         this.addFloatingText('Repair Beam!', '#00ff88', ship.x, ship.y - 12);
 
         if (targets.length === 0) {
-            this.addLog(`${this._shipLabel(ship)} repair beam: no allies in forward cone`);
+            this.addLog(`${this._shipLabel(ship)} repair beam: no ships in forward cone`);
         } else {
             targets.forEach(target => {
-                const hullRestored = Math.min(CONSTANTS.REPAIR_BEAM_HULL, target.maxHull - target.hull);
-                target.hull = Math.min(target.maxHull, target.hull + CONSTANTS.REPAIR_BEAM_HULL);
                 this.addAnimation({ type: 'tractorBeam', from: { x: ship.x, y: ship.y }, to: { x: target.x, y: target.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
-                if (hullRestored > 0) this.addFloatingText(`+${hullRestored} hull`, '#00ff88', target.x, target.y - 6);
-                this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: ${hullRestored > 0 ? `+${hullRestored} hull` : 'full'}`);
+                if (!target.alive) {
+                    // Resurrect dead ship
+                    target.alive = true;
+                    target.hull  = 1;
+                    target.shields = 0;
+                    this.addFloatingText('Revived!', '#00ff88', target.x, target.y - 6);
+                    this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: REVIVED!`);
+                } else {
+                    const hullRestored = Math.min(CONSTANTS.REPAIR_BEAM_HULL, target.maxHull - target.hull);
+                    target.hull = Math.min(target.maxHull, target.hull + CONSTANTS.REPAIR_BEAM_HULL);
+                    if (hullRestored > 0) this.addFloatingText(`+${hullRestored} hull`, '#00ff88', target.x, target.y - 6);
+                    this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: ${hullRestored > 0 ? `+${hullRestored} hull` : 'full'}`);
+                }
             });
         }
 
@@ -1527,6 +1785,53 @@ class Combat {
         this.addFloatingText('Marked!', '#ff8800', ship.x, ship.y - 12);
         this.addFloatingText('MARKED!', '#ff8800', target.x, target.y - 18);
         this.addLog(`${this._shipLabel(ship)} marked ${this._shipLabel(target)} — auto-hit for ${CONSTANTS.MARK_TURNS} turns!`);
+
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    playerAnchor(ship, target) {
+        ship.decloak();
+        target.anchoredTurns = CONSTANTS.ANCHOR_TURNS;
+        if (target.cloaked) target.decloak();
+
+        ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+        ship.specialMoveCooldowns['anchor'] = CONSTANTS.SPECIAL_MOVES.anchor.cooldown;
+        this.playerMode = null;
+
+        this.addAnimation({ type: 'tractorBeam', from: { x: ship.x, y: ship.y }, to: { x: target.x, y: target.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
+        this.addFloatingText('Anchored!', '#6699ff', ship.x, ship.y - 12);
+        this.addFloatingText('ANCHORED!', '#6699ff', target.x, target.y - 18);
+        this.addLog(`${this._shipLabel(ship)} anchored ${this._shipLabel(target)} — cannot move for ${CONSTANTS.ANCHOR_TURNS} turns!`);
+
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
+    }
+
+    playerSiphon(ship, target) {
+        ship.decloak();
+        const shieldDrain = Math.min(target.shields, randomInt(CONSTANTS.SIPHON_SHIELD_MIN, CONSTANTS.SIPHON_SHIELD_MAX));
+        target.shields = Math.max(0, target.shields - shieldDrain);
+        ship.shields = Math.min(ship.maxShields, ship.shields + shieldDrain);
+
+        // Add 1 to all of the target's active cooldowns
+        if (target.specialMoveCooldowns) {
+            for (const id of Object.keys(target.specialMoveCooldowns)) {
+                if (target.specialMoveCooldowns[id] > 0) target.specialMoveCooldowns[id]++;
+            }
+        }
+
+        ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+        ship.specialMoveCooldowns['siphon'] = CONSTANTS.SPECIAL_MOVES.siphon.cooldown;
+        this.playerMode = null;
+
+        this.addAnimation({ type: 'tractorBeam', from: { x: target.x, y: target.y }, to: { x: ship.x, y: ship.y }, duration: CONSTANTS.COMBAT_ANIMATION_SPEED, totalDuration: CONSTANTS.COMBAT_ANIMATION_SPEED });
+        this.addFloatingText('Siphon!', '#bb66ff', ship.x, ship.y - 12);
+        if (shieldDrain > 0) {
+            this.addFloatingText(`-${shieldDrain}`, '#4488ff', target.x, target.y - 6);
+            this.addFloatingText(`+${shieldDrain} shields`, '#4488ff', ship.x, ship.y - 6);
+        }
+        this.addLog(`${this._shipLabel(ship)} siphoned ${this._shipLabel(target)}: -${shieldDrain} shields, cooldowns +1`);
 
         this.checkAutoAdvance(ship);
         UISystem.updateCombatScreen(gameState, this);
@@ -1672,6 +1977,14 @@ class Combat {
             this.asteroids.push(asteroid);
         }
 
+        // Momentum: debris fires backward, ship lurches forward
+        ship.targetX = ship.x + Math.cos(ship.rotation) * CONSTANTS.DEBRIS_MOMENTUM;
+        ship.targetY = ship.y + Math.sin(ship.rotation) * CONSTANTS.DEBRIS_MOMENTUM;
+        ship._moveDuration = 250;
+        ship._moveElapsed  = 0;
+        ship._moveStarted  = false;
+        ship.isMoving = true;
+
         ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
         ship.specialMoveCooldowns['debris_field'] = CONSTANTS.SPECIAL_MOVES.debris_field.cooldown;
         this.playerMode = null;
@@ -1684,6 +1997,11 @@ class Combat {
     }
 
     playerMoveToPoint(ship, targetX, targetY) {
+        if ((ship.anchoredTurns || 0) > 0) {
+            this.addLog(`${this._shipLabel(ship)}: cannot move — anchored!`);
+            this.addFloatingText('Anchored!', '#6699ff', ship.x, ship.y - 12);
+            return;
+        }
         const dist = Math.round(distance(ship.x, ship.y, targetX, targetY));
         ship.targetX = targetX;
         ship.targetY = targetY;
@@ -1697,6 +2015,11 @@ class Combat {
     }
 
     playerRamShip(rammer, target) {
+        if ((rammer.anchoredTurns || 0) > 0) {
+            this.addLog(`${this._shipLabel(rammer)}: cannot ram — anchored!`);
+            this.addFloatingText('Anchored!', '#6699ff', rammer.x, rammer.y - 12);
+            return;
+        }
         const dist = distance(rammer.x, rammer.y, target.x, target.y);
         const moveDistance = Math.min(dist, rammer.engine);
         this.performRam(rammer, target, moveDistance);
@@ -1720,12 +2043,16 @@ class Combat {
         rammer.actionsRemaining = Math.max(0, rammer.actionsRemaining - 1); // costs 1 action like a move
 
         // Rammer self-damage immediately — direct hull, no shields
-        rammer.hull = Math.max(0, rammer.hull - ramDmg);
-        if (rammer.hull <= 0) rammer.alive = false;
-        rammer.triggerHitFlash(ramDmg, 0);
-        this.addFloatingText(`-${ramDmg}`, '#ff4444', rammer.x, rammer.y - 8);
+        if (rammer.collisionImmune) {
+            this.addFloatingText('Nullified!', '#88ff88', rammer.x, rammer.y - 8);
+        } else {
+            rammer.hull = Math.max(0, rammer.hull - ramDmg);
+            if (rammer.hull <= 0) rammer.alive = false;
+            rammer.triggerHitFlash(ramDmg, 0);
+            this.addFloatingText(`-${ramDmg}`, '#ff4444', rammer.x, rammer.y - 8);
+        }
 
-        this.addLog(`${this._shipLabel(rammer)} rammed ${this._shipLabel(target)}: -${ramDmg} hull self, -${targetDmg} hull target`);
+        this.addLog(`${this._shipLabel(rammer)} rammed ${this._shipLabel(target)}: -${rammer.collisionImmune ? 0 : ramDmg} hull self, -${target.collisionImmune ? 0 : targetDmg} hull target`);
 
         // Defer target damage, knockback, and explosion until rammer arrives
         const travelDist = distance(rammer.x, rammer.y, rammer.targetX, rammer.targetY);
@@ -1735,14 +2062,20 @@ class Combat {
 
         setTimeout(() => {
             // Direct hull damage — bypasses shields entirely
-            target.hull = Math.max(0, target.hull - targetDmg);
-            if (target.hull <= 0) target.alive = false;
-            target.triggerHitFlash(targetDmg, 0);
-            self.addFloatingText(`-${targetDmg}`, '#ff4444', target.x, target.y - 6);
+            if (target.collisionImmune) {
+                self.addFloatingText('Nullified!', '#88ff88', target.x, target.y - 6);
+            } else {
+                target.hull = Math.max(0, target.hull - targetDmg);
+                if (target.hull <= 0) target.alive = false;
+                target.triggerHitFlash(targetDmg, 0);
+                self.addFloatingText(`-${targetDmg}`, '#ff4444', target.x, target.y - 6);
+            }
 
-            target.targetX = target.x + Math.cos(ang) * pushDist;
-            target.targetY = target.y + Math.sin(ang) * pushDist;
-            target.isMoving = true;
+            if ((target.anchoredTurns || 0) <= 0) {
+                target.targetX = target.x + Math.cos(ang) * pushDist;
+                target.targetY = target.y + Math.sin(ang) * pushDist;
+                target.isMoving = true;
+            }
 
             if (!target.alive) {
                 self.addAnimation({ type: 'explosion', x: target.x, y: target.y, duration: CONSTANTS.EXPLOSION_DURATION });
@@ -1879,6 +2212,35 @@ class Combat {
                 }
             }
         });
+
+        // Anchor expiry
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if ((ship.anchoredTurns || 0) > 0) {
+                ship.anchoredTurns--;
+                if (ship.anchoredTurns === 0) {
+                    this.addFloatingText('Anchor released', '#6699ff', ship.x, ship.y - 12);
+                    this.addLog(`${this._shipLabel(ship)}: anchor released`);
+                }
+            }
+        });
+
+        // Hull and shield regen modules
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if (!ship.alive) return;
+            if ((ship.hullRegenPerRound || 0) > 0 && ship.hull < ship.maxHull) {
+                const regen = Math.min(ship.hullRegenPerRound, ship.maxHull - ship.hull);
+                ship.hull += regen;
+                this.addFloatingText(`+${regen}`, '#88ff88', ship.x, ship.y - 12);
+                this.addLog(`${this._shipLabel(ship)}: hull regen +${regen}`);
+            }
+            if ((ship.shieldRegenPerRound || 0) > 0 && ship.shields < ship.maxShields) {
+                const regen = Math.min(ship.shieldRegenPerRound, ship.maxShields - ship.shields);
+                ship.shields += regen;
+                this.addFloatingText(`+${regen}`, '#4488ff', ship.x, ship.y - 16);
+                this.addLog(`${this._shipLabel(ship)}: shield regen +${regen}`);
+            }
+        });
+
         this.playerShips.forEach(ship => {
             ship.resetTurn();
             if (ship.specialMoveCooldowns) {

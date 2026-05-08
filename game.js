@@ -767,6 +767,52 @@ const GameController = {
                         combat.playerMark(activeShip, clickedShip);
                     }
                 }
+            } else if (mode === 'chaingun') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && clickedShip !== activeShip) {
+                    const maxRange = combat.getShootRange(activeShip);
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    if (dist <= maxRange && !clickedShip.isPlayer) {
+                        console.log(`[click] → playerChaingun ${clickedShip.name}`);
+                        combat.playerChaingun(activeShip, clickedShip);
+                    }
+                }
+            } else if (mode === 'plasma_cannon') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && clickedShip !== activeShip) {
+                    const maxRange = combat.getShootRange(activeShip) * CONSTANTS.PLASMA_RANGE_MULT;
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    if (dist <= maxRange && !clickedShip.isPlayer) {
+                        console.log(`[click] → playerPlasmaCannon ${clickedShip.name}`);
+                        combat.playerPlasmaCannon(activeShip, clickedShip);
+                    }
+                }
+            } else if (mode === 'rocket_launcher') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    const acx = activeShip.x + Math.cos(activeShip.rotation) * CONSTANTS.WARHEAD_LAUNCH_DIST;
+                    const acy = activeShip.y + Math.sin(activeShip.rotation) * CONSTANTS.WARHEAD_LAUNCH_DIST;
+                    const d = distance(acx, acy, wx, wy);
+                    const tx = d <= CONSTANTS.WARHEAD_TARGET_RADIUS ? wx : acx + (wx - acx) / d * CONSTANTS.WARHEAD_TARGET_RADIUS;
+                    const ty = d <= CONSTANTS.WARHEAD_TARGET_RADIUS ? wy : acy + (wy - acy) / d * CONSTANTS.WARHEAD_TARGET_RADIUS;
+                    console.log(`[click] → playerRocketLauncher at (${tx.toFixed(0)},${ty.toFixed(0)})`);
+                    combat.playerRocketLauncher(activeShip, tx, ty);
+                }
+            } else if (mode === 'anchor') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && clickedShip !== activeShip) {
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    const ang = Math.atan2(clickedShip.y - activeShip.y, clickedShip.x - activeShip.x);
+                    const localAng = normalizeAngle(ang - activeShip.rotation);
+                    if (dist <= CONSTANTS.ANCHOR_RANGE && Math.abs(localAng) <= CONSTANTS.ANCHOR_CONE_HALF_ANGLE) {
+                        console.log(`[click] → playerAnchor ${clickedShip.name}`);
+                        combat.playerAnchor(activeShip, clickedShip);
+                    }
+                }
+            } else if (mode === 'siphon') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && clickedShip !== activeShip) {
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    if (dist <= CONSTANTS.SIPHON_RANGE) {
+                        console.log(`[click] → playerSiphon ${clickedShip.name}`);
+                        combat.playerSiphon(activeShip, clickedShip);
+                    }
+                }
             } else {
                 // Default: select only
                 if (clickedShip) combat.selectedCombatShip = clickedShip;

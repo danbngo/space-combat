@@ -126,6 +126,14 @@ class AISystem {
             return;
         }
 
+        // Anchored: cannot move — only shoot if in range
+        if ((aiShip.anchoredTurns || 0) > 0) {
+            const shootRange = combat.getShootRange(aiShip);
+            const inRange = playerShips.filter(s => s.alive && !s.cloaked && distance(aiShip.x, aiShip.y, s.x, s.y) <= shootRange);
+            if (inRange.length > 0) this.attackAction(aiShip, playerShips, combat);
+            return;
+        }
+
         // Carrier AI: summon drone if available and no drone already active
         if (aiShip.specialMoves && aiShip.specialMoves.includes('summon_drone')) {
             const cd = (aiShip.specialMoveCooldowns || {})['summon_drone'] || 0;

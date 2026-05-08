@@ -625,6 +625,43 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
+    // Forward cone showing anchor targeting arc
+    drawAnchorRange(ship) {
+        const halfAngle = CONSTANTS.ANCHOR_CONE_HALF_ANGLE;
+        const range = CONSTANTS.ANCHOR_RANGE;
+        this.ctx.save();
+        this.ctx.translate(ship.x, ship.y);
+        this.ctx.rotate(ship.rotation);
+        this.ctx.strokeStyle = 'rgba(100, 160, 255, 0.7)';
+        this.ctx.fillStyle   = 'rgba(100, 160, 255, 0.07)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.setLineDash([5 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, 0);
+        this.ctx.arc(0, 0, range, -halfAngle, halfAngle);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
+    }
+
+    // Small dashed circle showing siphon range
+    drawSiphonRange(ship) {
+        const range = CONSTANTS.SIPHON_RANGE;
+        this.ctx.save();
+        this.ctx.strokeStyle = 'rgba(180, 100, 255, 0.7)';
+        this.ctx.fillStyle   = 'rgba(180, 100, 255, 0.08)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        this.ctx.beginPath();
+        this.ctx.arc(ship.x, ship.y, range, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
+    }
+
     // Dashed circle showing flash targeting range
     drawFlashRange(ship) {
         const range = CONSTANTS.FLASH_RANGE;
@@ -1228,7 +1265,147 @@ class RenderingSystem {
         this.ctx.restore();
     }
 
-    drawLaser(from, to, progress = 1) {
+    drawChaingunRange(ship) {
+        const range = ship.radar * CONSTANTS.SHOOT_RANGE_BASE;
+        const SIZE  = CONSTANTS.SHIP_SIZE * (ship.sizeMult ?? 1.0);
+        const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType);
+        const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
+        const maxSide  = Math.max(...verts.map(v => Math.abs(v[1])));
+        const sideOffset = maxSide * SIZE * 1.15;
+        const halfBase   = range * 0.65;
+        this.ctx.save();
+        this.ctx.translate(ship.x, ship.y);
+        this.ctx.rotate(ship.rotation);
+        this.ctx.fillStyle   = 'rgba(255, 136, 0, 0.10)';
+        this.ctx.strokeStyle = 'rgba(255, 136, 0, 0.45)';
+        this.ctx.lineWidth = 0.5 / this.zoom;
+        this.ctx.beginPath(); this.ctx.moveTo(0, -sideOffset); this.ctx.lineTo(-halfBase, -sideOffset - range); this.ctx.lineTo(halfBase, -sideOffset - range); this.ctx.closePath(); this.ctx.fill(); this.ctx.stroke();
+        this.ctx.beginPath(); this.ctx.moveTo(0,  sideOffset); this.ctx.lineTo(-halfBase,  sideOffset + range); this.ctx.lineTo(halfBase,  sideOffset + range); this.ctx.closePath(); this.ctx.fill(); this.ctx.stroke();
+        this.ctx.restore();
+    }
+
+    drawPlasmaRange(ship) {
+        const range = ship.radar * CONSTANTS.SHOOT_RANGE_BASE * CONSTANTS.PLASMA_RANGE_MULT;
+        const SIZE  = CONSTANTS.SHIP_SIZE * (ship.sizeMult ?? 1.0);
+        const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType);
+        const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
+        const maxSide  = Math.max(...verts.map(v => Math.abs(v[1])));
+        const sideOffset = maxSide * SIZE * 1.15;
+        const halfBase   = range * 0.65;
+        this.ctx.save();
+        this.ctx.translate(ship.x, ship.y);
+        this.ctx.rotate(ship.rotation);
+        this.ctx.fillStyle   = 'rgba(100, 255, 150, 0.10)';
+        this.ctx.strokeStyle = 'rgba(100, 255, 150, 0.45)';
+        this.ctx.lineWidth = 0.5 / this.zoom;
+        this.ctx.beginPath(); this.ctx.moveTo(0, -sideOffset); this.ctx.lineTo(-halfBase, -sideOffset - range); this.ctx.lineTo(halfBase, -sideOffset - range); this.ctx.closePath(); this.ctx.fill(); this.ctx.stroke();
+        this.ctx.beginPath(); this.ctx.moveTo(0,  sideOffset); this.ctx.lineTo(-halfBase,  sideOffset + range); this.ctx.lineTo(halfBase,  sideOffset + range); this.ctx.closePath(); this.ctx.fill(); this.ctx.stroke();
+        this.ctx.restore();
+    }
+
+    drawRocketRange(ship) {
+        const launchDist   = CONSTANTS.WARHEAD_LAUNCH_DIST;
+        const targetRadius = CONSTANTS.WARHEAD_TARGET_RADIUS;
+        const blastRadius  = CONSTANTS.ROCKET_BLAST_RADIUS;
+        const cx = ship.x + Math.cos(ship.rotation) * launchDist;
+        const cy = ship.y + Math.sin(ship.rotation) * launchDist;
+        this.ctx.save();
+        this.ctx.strokeStyle = 'rgba(255, 100, 50, 0.4)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
+        this.ctx.beginPath(); this.ctx.moveTo(ship.x, ship.y); this.ctx.lineTo(cx, cy); this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.strokeStyle = 'rgba(255, 100, 50, 0.7)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.setLineDash([3 / this.zoom, 3 / this.zoom]);
+        this.ctx.beginPath(); this.ctx.arc(cx, cy, targetRadius, 0, Math.PI * 2); this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        this.ctx.strokeStyle = 'rgba(255, 100, 50, 0.12)';
+        this.ctx.lineWidth = 0.5 / this.zoom;
+        this.ctx.beginPath(); this.ctx.arc(cx, cy, targetRadius + blastRadius, 0, Math.PI * 2); this.ctx.stroke();
+        const ch = 4 / this.zoom;
+        this.ctx.strokeStyle = 'rgba(255, 100, 50, 0.8)';
+        this.ctx.lineWidth = 1 / this.zoom;
+        this.ctx.beginPath(); this.ctx.moveTo(cx - ch, cy); this.ctx.lineTo(cx + ch, cy); this.ctx.moveTo(cx, cy - ch); this.ctx.lineTo(cx, cy + ch); this.ctx.stroke();
+        this.ctx.restore();
+    }
+
+    drawRocketCursor(ship, wx, wy) {
+        const launchDist   = CONSTANTS.WARHEAD_LAUNCH_DIST;
+        const targetRadius = CONSTANTS.WARHEAD_TARGET_RADIUS;
+        const blastRadius  = CONSTANTS.ROCKET_BLAST_RADIUS;
+        const acx = ship.x + Math.cos(ship.rotation) * launchDist;
+        const acy = ship.y + Math.sin(ship.rotation) * launchDist;
+        const d = distance(acx, acy, wx, wy);
+        const inside = d <= targetRadius;
+        const tx = inside ? wx : acx + (wx - acx) / d * targetRadius;
+        const ty = inside ? wy : acy + (wy - acy) / d * targetRadius;
+        this.ctx.save();
+        this.ctx.fillStyle   = 'rgba(255, 100, 50, 0.08)';
+        this.ctx.strokeStyle = inside ? 'rgba(255, 100, 50, 0.65)' : 'rgba(255, 100, 50, 0.3)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.beginPath(); this.ctx.arc(tx, ty, blastRadius, 0, Math.PI * 2); this.ctx.fill(); this.ctx.stroke();
+        const ch = 5 / this.zoom;
+        this.ctx.strokeStyle = inside ? 'rgba(255, 100, 50, 0.95)' : 'rgba(255, 100, 50, 0.4)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.beginPath(); this.ctx.moveTo(tx - ch, ty); this.ctx.lineTo(tx + ch, ty); this.ctx.moveTo(tx, ty - ch); this.ctx.lineTo(tx, ty + ch); this.ctx.stroke();
+        this.ctx.restore();
+    }
+
+    drawChaingunRound(from, to, progress = 1) {
+        const t  = Math.min(1, progress);
+        const x  = from.x + (to.x - from.x) * t;
+        const y  = from.y + (to.y - from.y) * t;
+        const t2 = Math.max(0, t - 0.15);
+        const tx = from.x + (to.x - from.x) * t2;
+        const ty = from.y + (to.y - from.y) * t2;
+        this.ctx.save();
+        this.ctx.strokeStyle = 'rgba(255,136,0,0.55)';
+        this.ctx.lineWidth = 1.5 / this.zoom;
+        this.ctx.beginPath(); this.ctx.moveTo(tx, ty); this.ctx.lineTo(x, y); this.ctx.stroke();
+        this.ctx.fillStyle = '#ffaa33';
+        this.ctx.beginPath(); this.ctx.arc(x, y, 2.5 / this.zoom, 0, Math.PI * 2); this.ctx.fill();
+        this.ctx.restore();
+    }
+
+    drawPlasmaRound(from, to, progress = 1) {
+        const t  = Math.min(1, progress);
+        const x  = from.x + (to.x - from.x) * t;
+        const y  = from.y + (to.y - from.y) * t;
+        const t2 = Math.max(0, t - 0.22);
+        const tx = from.x + (to.x - from.x) * t2;
+        const ty = from.y + (to.y - from.y) * t2;
+        this.ctx.save();
+        this.ctx.strokeStyle = 'rgba(100,255,160,0.40)';
+        this.ctx.lineWidth = 2.5 / this.zoom;
+        this.ctx.beginPath(); this.ctx.moveTo(tx, ty); this.ctx.lineTo(x, y); this.ctx.stroke();
+        this.ctx.shadowColor = '#88ffaa';
+        this.ctx.shadowBlur  = 14;
+        this.ctx.fillStyle   = '#ccffdd';
+        this.ctx.beginPath(); this.ctx.arc(x, y, 4 / this.zoom, 0, Math.PI * 2); this.ctx.fill();
+        this.ctx.shadowBlur = 0;
+        this.ctx.restore();
+    }
+
+    drawRocketBlast(x, y, progress = 0) {
+        const peakAt = 0.3;
+        const sizeFactor = progress < peakAt ? progress / peakAt : 1 - (progress - peakAt) / (1 - peakAt);
+        const maxSize = CONSTANTS.ROCKET_BLAST_RADIUS;
+        const size = Math.max(0.1, maxSize * sizeFactor);
+        const alpha = Math.max(0, 1 - progress);
+        this.ctx.save();
+        this.ctx.globalAlpha = alpha;
+        this.ctx.fillStyle = '#ff4400';
+        this.ctx.beginPath(); this.ctx.arc(x, y, size, 0, Math.PI * 2); this.ctx.fill();
+        this.ctx.fillStyle = '#ffaa00';
+        this.ctx.beginPath(); this.ctx.arc(x, y, size * 0.55, 0, Math.PI * 2); this.ctx.fill();
+        this.ctx.strokeStyle = '#ff6600';
+        this.ctx.lineWidth = 2 / this.zoom;
+        this.ctx.beginPath(); this.ctx.arc(x, y, size * 1.4, 0, Math.PI * 2); this.ctx.stroke();
+        this.ctx.restore();
+    }
+
+    drawLaser(from, to, progress = 1, colorScheme = null) {
         const TRAIL = 0.18;
         const tipT  = Math.min(1, progress);
         const tailT = Math.max(0, progress - TRAIL);
@@ -1237,14 +1414,17 @@ class RenderingSystem {
         const tailX = from.x + (to.x - from.x) * tailT;
         const tailY = from.y + (to.y - from.y) * tailT;
 
-        this.ctx.strokeStyle = '#ff2222';
+        const core  = colorScheme === 'repulsor' ? '#cc88ff' : '#ff2222';
+        const glow  = colorScheme === 'repulsor' ? 'rgba(180,100,255,0.35)' : 'rgba(255,80,80,0.35)';
+
+        this.ctx.strokeStyle = core;
         this.ctx.lineWidth = (CONSTANTS.LASER_SIZE * 0.7) / this.zoom;
         this.ctx.beginPath();
         this.ctx.moveTo(tailX, tailY);
         this.ctx.lineTo(tipX, tipY);
         this.ctx.stroke();
 
-        this.ctx.strokeStyle = 'rgba(255,80,80,0.35)';
+        this.ctx.strokeStyle = glow;
         this.ctx.lineWidth = (CONSTANTS.LASER_SIZE * 2) / this.zoom;
         this.ctx.beginPath();
         this.ctx.moveTo(tailX, tailY);

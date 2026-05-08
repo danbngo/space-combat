@@ -192,6 +192,21 @@ class SpaceTravel {
             encounters.push({ faction, size, fleetStrength, _crossT: crossT });
         }
 
+        // Guarantee at least one encounter
+        if (encounters.length === 0) {
+            const totalWeight = Object.values(factionWeights).reduce((a, b) => a + b, 0);
+            let r = Math.random() * totalWeight;
+            let faction = 'pirates';
+            for (const [f, w] of Object.entries(factionWeights)) {
+                r -= w;
+                if (r <= 0) { faction = f; break; }
+            }
+            const size = fleetStrength <= 3 ? randomInt(1, 2)
+                       : fleetStrength <= 6 ? randomInt(2, 4)
+                       : randomInt(3, 6);
+            encounters.push({ faction, size, fleetStrength, _crossT: 0.15 + Math.random() * 0.70 });
+        }
+
         return encounters.sort((a, b) => a._crossT - b._crossT);
     }
 
@@ -252,11 +267,36 @@ class SpaceTravel {
 
         const size = encounter && encounter.size ? encounter.size : (strength <= 3 ? randomInt(1, 2) : strength <= 6 ? randomInt(2, 4) : randomInt(3, 6));
 
+        // Module chance ramps from 0 at strength 2 to 1.0 at strength 10
+        const moduleChance = Math.max(0, (strength - 2) / 8);
+        const factionModulePool = (CONSTANTS.FACTION_MODULES || {})[faction] || [];
+
         const fleet = [];
         for (let i = 0; i < size; i++) {
             const type = pool[Math.floor(Math.random() * pool.length)];
             const ship = this.generateShipOfType(type);
             if (factionColor) ship.factionColor = factionColor;
+
+            // Equip modules — try each slot independently
+            if (factionModulePool.length > 0) {
+                const slotCount = ship.moduleSlots || CONSTANTS.MODULE_SLOTS;
+                for (let slot = 0; slot < slotCount; slot++) {
+                    if (Math.random() > moduleChance) continue;
+                    // Pick a random module from the pool that isn't already installed and doesn't conflict
+                    const shuffled = factionModulePool.slice().sort(() => Math.random() - 0.5);
+                    for (const modId of shuffled) {
+                        const modDef = CONSTANTS.MODULES.find(m => m.id === modId);
+                        if (!modDef || ship.modules.some(m => m.id === modId)) continue;
+                        if (modDef.exclusiveGroup && ship.modules.some(m => {
+                            const d = CONSTANTS.MODULES.find(md => md.id === m.id);
+                            return d && d.exclusiveGroup === modDef.exclusiveGroup;
+                        })) continue;
+                        ship.installModule(modDef, 1.0);
+                        break;
+                    }
+                }
+            }
+
             fleet.push(ship);
         }
         assignFleetNames(fleet);

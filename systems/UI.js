@@ -510,7 +510,7 @@ class UISystem {
                     return `<span style="color:${fd ? fd.color : '#fff'};">${fd ? fd.name : id}: ${Math.round(w)}%</span>`;
                 }).join('<br>');
             info.innerHTML = `<p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">${tierLabel} · Threat: ${strLabel} (${routeData.fleetStrength}/10)</p>
-                <p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">Up to ${routeData.maxEncounters} encounter${routeData.maxEncounters !== 1 ? 's' : ''}</p>
+                <p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">1–${routeData.maxEncounters} encounters</p>
                 <p style="font-size:0.85em;margin:0.4em 0 0;">Factions:<br>${factionRows}</p>`;
         } else if (info) {
             info.innerHTML = '<p style="color:#555;font-size:0.85em;">No route data.</p>';
@@ -679,8 +679,12 @@ class UISystem {
                 const installed  = currentShip.modules.some(m => m.id === mod.id);
                 const noSlots    = !isBuiltin && !installed && slotsFree <= 0;
                 const cantAfford = !isBuiltin && !installed && gameState.credits < offer.cost;
-                const disabled   = isBuiltin || installed || noSlots || cantAfford;
-                const label      = installed ? 'Installed' : (noSlots ? 'Full' : 'Install');
+                const conflicts  = !isBuiltin && !installed && !!mod.exclusiveGroup && currentShip.modules.some(m => {
+                    const def = CONSTANTS.MODULES.find(md => md.id === m.id);
+                    return def && def.exclusiveGroup === mod.exclusiveGroup;
+                });
+                const disabled   = isBuiltin || installed || noSlots || cantAfford || conflicts;
+                const label      = installed ? 'Installed' : (noSlots ? 'Full' : (conflicts ? 'Conflicts' : 'Install'));
                 const qualColor  = offer.quality >= 1.1 ? '#00ff88' : offer.quality <= 0.9 ? '#ff8888' : '#ffdd44';
                 const qualLabel  = `<span style="color:${qualColor};font-size:0.8em;"> ×${offer.quality.toFixed(2)}</span>`;
                 return `<tr>
@@ -1112,11 +1116,43 @@ class UISystem {
                             <button id="combatConfirmDebrisBtn" class="btn-primary">Launch</button>
                         </div>
                         <p style="color:#cc8844;font-size:0.8em;margin-top:0.5em;text-align:center;">Click anywhere or Launch to hurl 3–5 rocks in the forward cone</p>`;
+                } else if (!isAnimating && mode === 'chaingun') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ff8800;font-size:0.8em;margin-top:0.5em;text-align:center;">Click an enemy in range — fires 5 rounds, each hits independently, bypasses shields</p>`;
+                } else if (!isAnimating && mode === 'plasma_cannon') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#88ffaa;font-size:0.8em;margin-top:0.5em;text-align:center;">Click an enemy in range (75%) — slow round drains shields 1.5× faster</p>`;
+                } else if (!isAnimating && mode === 'rocket_launcher') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#ff6633;font-size:0.8em;margin-top:0.5em;text-align:center;">Click within the targeting circle — guaranteed hit blast damages all ships in radius</p>`;
+                } else if (!isAnimating && mode === 'anchor') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#6699ff;font-size:0.8em;margin-top:0.5em;text-align:center;">Click any ship in the forward cone — locks it in place for 2 turns, immune to knockback</p>`;
+                } else if (!isAnimating && mode === 'siphon') {
+                    actionsHtml = `
+                        <div class="combat-action-row">
+                            <button id="combatCancelModeBtn" class="btn-secondary">Cancel</button>
+                        </div>
+                        <p style="color:#bb66ff;font-size:0.8em;margin-top:0.5em;text-align:center;">Click any ship within the circle — drains 5–10 shields and adds 1 to all its cooldowns</p>`;
                 } else {
                     const overheated = activeTurnShip.statusEffect === 'plasma';
                     const blinded    = (activeTurnShip.blindedTurns || 0) > 0;
+                    const anchored   = (activeTurnShip.anchoredTurns || 0) > 0;
                     const hasStatus  = !!activeTurnShip.statusEffect;
                     const dis     = !hasActions || isAnimating ? 'disabled' : '';
+                    const moveDis = !hasActions || isAnimating || anchored ? 'disabled' : '';
                     const fireDis = !hasActions || !hasValidTargets || isAnimating || overheated || blinded ? 'disabled' : '';
 
                     // Special move buttons — one per move the ship has
@@ -1126,11 +1162,12 @@ class UISystem {
                         if (!moveDef) return '';
                         const cd = cooldowns[moveId] || 0;
                         const onCd  = cd > 0;
-                        const cloakBlocked  = moveId === 'cloak'  && hasStatus;
-                        const flashBlocked  = moveId === 'flash'  && blinded;
-                        const btnDis = onCd || !hasActions || isAnimating || overheated || cloakBlocked || flashBlocked ? 'disabled' : '';
+                        const cloakBlocked      = moveId === 'cloak'       && hasStatus;
+                        const flashBlocked      = moveId === 'flash'       && blinded;
+                        const anchorBlocked     = anchored && ['afterburner', 'blink'].includes(moveId);
+                        const btnDis = onCd || !hasActions || isAnimating || overheated || cloakBlocked || flashBlocked || anchorBlocked ? 'disabled' : '';
                         const label  = onCd ? `${moveDef.name} (${cd})` : moveDef.name;
-                        const color  = onCd || overheated || cloakBlocked || flashBlocked ? '#555' : '#cc99ff';
+                        const color  = onCd || overheated || cloakBlocked || flashBlocked || anchorBlocked ? '#555' : '#cc99ff';
                         return `<button class="btn-primary combat-special-btn" ${btnDis} data-move-id="${moveId}" style="color:${color};" data-tooltip="${moveDef.desc}">${label}</button>`;
                     }).join('');
 
@@ -1140,7 +1177,7 @@ class UISystem {
                     actionsHtml = `
                         <div style="text-align:center;font-size:0.8em;color:#aaa;margin-bottom:0.25em;">Actions: ${activeTurnShip.actionsRemaining}/2</div>
                         <div class="combat-action-row">
-                            <button id="combatMoveBtn" class="btn-primary" ${dis} data-tooltip="Move your ship within range, or click an adjacent enemy to ram.">Move</button>
+                            <button id="combatMoveBtn" class="btn-primary" ${moveDis} data-tooltip="${anchored ? 'Cannot move — anchored!' : 'Move your ship within range, or click an adjacent enemy to ram.'}">Move${anchored ? ' [Anchored]' : ''}</button>
                             <button id="combatFireBtn" class="btn-primary" ${fireDis} data-tooltip="Fire lasers at an enemy within range and firing arc.">Fire</button>
                             <button id="combatSkipBtn" class="btn-secondary" ${dis} data-tooltip="${rechargeTooltip}">${rechargeLabel}</button>
                         </div>

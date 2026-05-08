@@ -90,6 +90,13 @@ class StationSystem {
         if (gameState.credits < cost) return false;
         if (ship.modules.length >= ship.moduleSlots) return false;
         if (ship.modules.some(m => m.id === moduleDef.id)) return false;
+        if (moduleDef.exclusiveGroup) {
+            const conflict = ship.modules.some(m => {
+                const def = CONSTANTS.MODULES.find(md => md.id === m.id);
+                return def && def.exclusiveGroup === moduleDef.exclusiveGroup;
+            });
+            if (conflict) return false;
+        }
         gameState.credits -= cost;
         ship.installModule(moduleDef, quality);
         return true;

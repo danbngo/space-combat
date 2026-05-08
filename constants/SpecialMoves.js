@@ -61,6 +61,27 @@ const CONSTANTS_SPECIAL_MOVES = {
     DEBRIS_FIELD_LAUNCH_DIST:    40,        // px ahead of ship where asteroids spawn
     DEBRIS_FIELD_SPEED:         120,        // px/s launch velocity
 
+    // Chaingun
+    CHAINGUN_ROUNDS:      5,
+    CHAINGUN_DAMAGE_MULT: 0.5,   // 50% total laser damage split across rounds
+
+    // Plasma Cannon
+    PLASMA_RANGE_MULT:  0.75,
+    PLASMA_SHIELD_MULT: 1.5,     // shields drained 1.5× per damage point
+
+    // Rocket Launcher
+    ROCKET_BLAST_RADIUS: 35,     // px AoE radius (smaller than EMP/warhead)
+
+    // Anchor
+    ANCHOR_CONE_HALF_ANGLE: Math.PI / 4,   // ±45° = 90° forward cone
+    ANCHOR_RANGE:           150,            // max px within cone
+    ANCHOR_TURNS:             2,            // turns the anchored status lasts
+
+    // Siphon
+    SIPHON_RANGE:       40,   // px radius around caster
+    SIPHON_SHIELD_MIN:   5,
+    SIPHON_SHIELD_MAX:  10,
+
     SPECIAL_MOVES: {
         blink:        { id: 'blink',        name: 'Blink',        desc: 'Teleport up to 80px in any direction.',                                                                          actionCost: 1, cooldown: 2 },
         afterburner:  { id: 'afterburner',  name: 'Afterburner',  desc: 'Dash forward at full range; damages enemies in path.',                                                           actionCost: 1, cooldown: 2 },
@@ -74,6 +95,11 @@ const CONSTANTS_SPECIAL_MOVES = {
         flash:        { id: 'flash',        name: 'Flash',        desc: 'Emit a blinding flash at a target point within 80px. Deals 1 damage and blinds all ships in the blast for 2 turns — blinded ships cannot fire.', actionCost: 1, cooldown: 3 },
         hack:         { id: 'hack',         name: 'Hack',         desc: 'Hack any ship within 28px — friend or foe. The target goes berserk for 2 turns: randomly attacks nearby ships using only lasers and ramming, with 2× actions.', actionCost: 1, cooldown: 4 },
         debris_field: { id: 'debris_field', name: 'Debris Field', desc: 'Launch 3–5 small asteroids in a forward cone. Each travels in a straight line and damages any ship it hits.', actionCost: 1, cooldown: 3 },
-        mark:         { id: 'mark',         name: 'Mark',         desc: 'Designate one ship in the forward 90° cone as a priority target — all laser shots against it auto-hit for 3 turns.', actionCost: 1, cooldown: 4 },
+        mark:            { id: 'mark',            name: 'Mark',            desc: 'Designate one ship in the forward 90° cone as a priority target — all laser shots against it auto-hit for 3 turns.', actionCost: 1, cooldown: 4 },
+        chaingun:        { id: 'chaingun',        name: 'Chaingun',        desc: 'Fire 5 rounds — each hits or misses independently, bypasses shields entirely. 50% total laser damage.', actionCost: 1, cooldown: 0 },
+        plasma_cannon:   { id: 'plasma_cannon',   name: 'Plasma Cannon',   desc: 'Slow round at 75% range. Drains shields 1.5× — punches through shields faster and deals bonus hull damage when target is partially shielded.', actionCost: 1, cooldown: 0 },
+        rocket_launcher: { id: 'rocket_launcher', name: 'Rockets',         desc: 'Fire a rocket into the targeting area — guaranteed hit, laser damage to all ships in blast radius. 1-turn cooldown.', actionCost: 1, cooldown: 2 },
+        anchor:          { id: 'anchor',          name: 'Anchor',          desc: 'Lock a ship in the forward cone — it cannot move or be knocked back for 2 turns.',                                             actionCost: 1, cooldown: 3 },
+        siphon:          { id: 'siphon',          name: 'Siphon',          desc: 'Drain 5–10 shields from any nearby ship and add 1 cooldown to all of its abilities.',                                          actionCost: 1, cooldown: 3 },
     },
 };

@@ -134,6 +134,16 @@ class Ship {
         // 'bonus_action' has no immediate stat change
         } else if (e.type === 'special_move') {
             if (!this.specialMoves.includes(e.move)) this.specialMoves.push(e.move);
+        } else if (e.type === 'hull_regen') {
+            this.hullRegenPerRound = (this.hullRegenPerRound || 0) + amt;
+        } else if (e.type === 'shield_regen') {
+            this.shieldRegenPerRound = (this.shieldRegenPerRound || 0) + amt;
+        } else if (e.type === 'collision_immune') {
+            this.collisionImmune = true;
+        } else if (e.type === 'reflect_projectile') {
+            this.projectileReflectChance = (this.projectileReflectChance || 0) + 0.20;
+        } else if (e.type === 'repulsor') {
+            this.hasRepulsor = true;
         }
     }
 
