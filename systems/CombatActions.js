@@ -349,13 +349,22 @@ Combat.prototype.playerAfterburner = function(ship, tx, ty) {
         this._decloakDephase(ship);
         // tx/ty is clamped to the steering cone by the caller; clamp range as a safety net
         const maxRange = ship.engine * (CONSTANTS.COMBAT_MOVE_OVAL_OFFSET + CONSTANTS.COMBAT_MOVE_OVAL_MAJOR) * CONSTANTS.AFTERBURNER_RANGE_MULT;
-        const dist = distance(ship.x, ship.y, tx, ty);
-        if (dist > maxRange && dist > 0) {
-            tx = ship.x + (tx - ship.x) / dist * maxRange;
-            ty = ship.y + (ty - ship.y) / dist * maxRange;
+        const rawDist = distance(ship.x, ship.y, tx, ty);
+        if (rawDist > maxRange && rawDist > 0) {
+            tx = ship.x + (tx - ship.x) / rawDist * maxRange;
+            ty = ship.y + (ty - ship.y) / rawDist * maxRange;
         }
 
         const startX = ship.x, startY = ship.y;
+        const pathDist = distance(startX, startY, tx, ty);
+        const dirX = pathDist > 0 ? (tx - startX) / pathDist : 1;
+        const dirY = pathDist > 0 ? (ty - startY) / pathDist : 0;
+
+        // Project a position onto the path; returns t ∈ [0, 1]
+        const projectT = (ox, oy) => pathDist > 0
+            ? Math.max(0, Math.min(1, ((ox - startX) * dirX + (oy - startY) * dirY) / pathDist))
+            : 0;
+
         const enemies = ship.isPlayer ? this.enemyShips : this.playerShips;
         const hitsInPath = enemies.filter(e =>
             e.alive && distancePointToLineSegment(e.x, e.y, startX, startY, tx, ty) <= CONSTANTS.AFTERBURNER_HALF_WIDTH
@@ -363,6 +372,30 @@ Combat.prototype.playerAfterburner = function(ship, tx, ty) {
         const asteroidsInPath = [...this.asteroids].filter(a =>
             distancePointToLineSegment(a.x, a.y, startX, startY, tx, ty) <= CONSTANTS.AFTERBURNER_HALF_WIDTH + a.radius
         );
+
+        // Find the first (closest) obstacle — afterburner stops there
+        const SHIP_R = CONSTANTS.ASTEROID_SHIP_RADIUS;
+        let firstT = 1.0, firstShip = null, firstAsteroid = null;
+        for (const e of hitsInPath) {
+            const t = projectT(e.x, e.y);
+            if (t < firstT) { firstT = t; firstShip = e; firstAsteroid = null; }
+        }
+        for (const a of asteroidsInPath) {
+            const t = projectT(a.x, a.y);
+            if (t < firstT) { firstT = t; firstAsteroid = a; firstShip = null; }
+        }
+
+        const hasCollision = firstShip !== null || firstAsteroid !== null;
+
+        // Stop just before the first obstacle so resolveOverlaps handles the bounce
+        if (hasCollision) {
+            const stopRadius = firstShip
+                ? SHIP_R * ((ship.sizeMult ?? 1) + (firstShip.sizeMult ?? 1)) + 4
+                : SHIP_R + (firstAsteroid ? firstAsteroid.radius : 0) + 4;
+            const stopDist = Math.max(0, firstT * pathDist - stopRadius);
+            tx = startX + dirX * stopDist;
+            ty = startY + dirY * stopDist;
+        }
 
         ship.targetX = tx;
         ship.targetY = ty;
@@ -386,32 +419,32 @@ Combat.prototype.playerAfterburner = function(ship, tx, ty) {
         ship.specialMoveCooldowns['afterburner'] = CONSTANTS.SPECIAL_MOVES.afterburner.cooldown;
         this.playerMode = null;
 
-        if (hitsInPath.length > 0 || asteroidsInPath.length > 0) {
+        if (hasCollision) {
             const delay = travelTime;
             const self = this;
             setTimeout(() => {
-                hitsInPath.forEach(target => {
-                    if (!target.alive) return;
+                if (firstShip && firstShip.alive) {
                     const dmg = randomInt(1, Math.max(1, Math.floor(ship.engine / 2)));
-                    const shieldAbsorb = Math.min(dmg, target.shields);
+                    const shieldAbsorb = Math.min(dmg, firstShip.shields);
                     const hullDmg = dmg - shieldAbsorb;
-                    target.takeDamage(dmg);
-                    target.triggerHitFlash(hullDmg, shieldAbsorb);
-                    if (shieldAbsorb > 0) self.addFloatingText(`-${shieldAbsorb}`, '#4488ff', target.x, target.y - 20);
-                    if (hullDmg > 0) self.addFloatingText(`-${hullDmg}`, '#ff4444', target.x, target.y - 6);
+                    firstShip.takeDamage(dmg);
+                    firstShip.triggerHitFlash(hullDmg, shieldAbsorb);
+                    if (shieldAbsorb > 0) self.addFloatingText(`-${shieldAbsorb}`, '#4488ff', firstShip.x, firstShip.y - 20);
+                    if (hullDmg > 0) self.addFloatingText(`-${hullDmg}`, '#ff4444', firstShip.x, firstShip.y - 6);
                     const parts = [];
                     if (shieldAbsorb > 0) parts.push(`${shieldAbsorb} shld`);
                     if (hullDmg > 0) parts.push(`${hullDmg} hull`);
-                    self.addLog(`${self._shipLabel(ship)} afterburner → ${self._shipLabel(target)}: -${parts.join(' -')}`);
-                    if (!target.alive) {
-                        self.addAnimation({ type: 'explosion', x: target.x, y: target.y, duration: CONSTANTS.EXPLOSION_DURATION });
-                        self.addLog(`${self._shipLabel(target)} destroyed!`);
+                    self.addLog(`${self._shipLabel(ship)} afterburner → ${self._shipLabel(firstShip)}: -${parts.join(' -')}`);
+                    if (!firstShip.alive) {
+                        self.addAnimation({ type: 'explosion', x: firstShip.x, y: firstShip.y, duration: CONSTANTS.EXPLOSION_DURATION });
+                        self.addLog(`${self._shipLabel(firstShip)} destroyed!`);
                     }
-                });
-                asteroidsInPath.forEach(a => {
-                    const ang = Math.atan2(a.y - startY, a.x - startX);
-                    self.splitAsteroid(a, ang);
-                });
+                }
+                if (firstAsteroid) {
+                    const ang = Math.atan2(firstAsteroid.y - startY, firstAsteroid.x - startX);
+                    self.splitAsteroid(firstAsteroid, ang);
+                }
+                self._pendingOverlapCheck = true;
             }, delay);
         }
 

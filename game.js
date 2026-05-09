@@ -4,7 +4,7 @@
  * @typedef {{
  *   state: string,
  *   credits: number,
- *   systems: Array<{id:number, name:string, tier:number, x:number, y:number, visited:boolean, connections:number[], parentId:number|null, isQueenPlanet:boolean, hasRepair:boolean, hasShipyard:boolean, hasMechanic:boolean, hasCourthouse:boolean}>,
+ *   systems: Array<{id:number, name:string, tier:number, x:number, y:number, visited:boolean, connections:number[], parentId:number|null, isQueenPlanet:boolean, stationType:string|null}>,
  *   routes: Map<string, object>,
  *   bounty: number,
  *   currentSystem: object,
@@ -49,7 +49,7 @@ const GameController = {
             jammer:       'images/jammer.png',
             repair_ship:  'images/repair_ship.png',
             scout:        'images/scout.png',
-            smuggler:     'images/smuggler.png',
+            blockade_runner:     'images/blockade_runner.png',
             raider:       'images/raider.png',
             hijacker:     'images/hijacker.png',
             amplifier:    'images/amplifier.png',
@@ -185,7 +185,6 @@ const GameController = {
         
         // Game Over Screen
         document.getElementById('gameOverButton').addEventListener('click', () => {
-            UISystem.stationTab = 'orbit';
             UISystem.currentStationOffer = null;
             UISystem.currentModuleOffer = null;
             combat = null;
@@ -208,7 +207,7 @@ const GameController = {
     visitStation: function() {
         gameState.state = GAME_STATE.STATION;
         gameState.selectedShip = gameState.selectedShip || gameState.playerShips[0] || null;
-        UISystem.stationTab = 'orbit';
+        // Tab is driven by stationType — updateStationScreen sets it; just clear offers
         UISystem.currentStationOffer = null;
         UISystem.currentModuleOffer = null;
         StationSystem.visitStation(gameState);
@@ -281,6 +280,10 @@ const GameController = {
         const factionName = factionData ? factionData.name : 'Unknown';
         const factionColor = factionData ? factionData.color : '#ffffff';
 
+        // Route hazard flags — threaded into every combat on this route
+        const _routeData = routeKey && gameState.routes ? gameState.routes.get(routeKey) : null;
+        const _hazardOpts = _routeData ? { hasAsteroids: _routeData.hasAsteroids, cloudType: _routeData.cloudType } : {};
+
         // Soldiers with non-negative fame: show a clearance modal instead of silent pass
         if (encounter.faction === 'soldiers' && (gameState.fame || 0) >= 0) {
             const computeFameDelta = (faction, playerInitiated) => {
@@ -295,7 +298,7 @@ const GameController = {
                 _defeatedEncounterInfo = { faction: encounter.faction, size: encounter.size, fameDelta, isQueenFight: false };
                 gameState.enemyShips = preGenFleetSoldier;
                 _travelContinuation = onContinue;
-                this.startCombat(combatOptions);
+                this.startCombat({ ..._hazardOpts, ...combatOptions });
             };
             const removeEncounterFn = () => {};
             const modalEl2   = document.getElementById('encounterModal');
@@ -348,7 +351,7 @@ const GameController = {
             };
             gameState.enemyShips = preGenFleet;
             _travelContinuation = onContinue;
-            this.startCombat(combatOptions);
+            this.startCombat({ ..._hazardOpts, ...combatOptions });
         };
 
         const modalEl    = document.getElementById('encounterModal');
@@ -981,6 +984,11 @@ const GameController = {
 
         gameState.playerShips = [...combat.playerShips, ...combat.fleedPlayerShips];
         gameState.enemyShips = combat.enemyShips;
+
+        // Restore hull and shields to max between encounters
+        gameState.playerShips.forEach(s => {
+            if (s.alive) { s.hull = s.maxHull; s.shields = s.maxShields; }
+        });
 
         cancelAnimationFrame(animationFrameId);
 

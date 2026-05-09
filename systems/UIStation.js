@@ -59,65 +59,30 @@ UISystem.updateStationScreen = function(gameState) {
             });
         }
 
-        // Venue availability — gate tabs on current system flags
+        // Single-tab station: show only the tab matching the current system's stationType
         const sys = gameState.currentSystem;
-        const hasShipyard   = sys && sys.hasShipyard;
-        const hasMechanic   = sys && sys.hasMechanic;
-        const hasCourthouse = sys && sys.hasCourthouse;
+        const stationType = sys && sys.stationType;  // 'shipyard' | 'mechanic' | 'courthouse'
 
-        const shipyardTab   = document.getElementById('shipyardTab');
-        const modulesTab    = document.getElementById('modulesTab');
-        const courthouseTab = document.getElementById('courthouseTab');
-        if (shipyardTab)   { shipyardTab.style.display   = hasShipyard   ? '' : 'none'; shipyardTab.textContent   = 'Shipyard'; }
-        if (modulesTab)    { modulesTab.style.display    = hasMechanic   ? '' : 'none'; modulesTab.textContent    = 'Mechanic'; }
-        if (courthouseTab) { courthouseTab.style.display = hasCourthouse ? '' : 'none'; courthouseTab.textContent = 'Courthouse'; }
+        // Map stationType → which tab element is active
+        const tabIdMap = { shipyard: 'shipyardTab', mechanic: 'modulesTab', courthouse: 'courthouseTab' };
+        const activeTabId = tabIdMap[stationType] || 'shipyardTab';
 
-        // If current tab is now hidden, fall back to orbit
-        if ((this.stationTab === 'shipyard'   && !hasShipyard)  ||
-            (this.stationTab === 'modules'    && !hasMechanic)  ||
-            (this.stationTab === 'courthouse' && !hasCourthouse)) {
-            this.stationTab = 'orbit';
-        }
+        // Always force the tab to match the station type
+        this.stationTab = stationType === 'mechanic' ? 'modules'
+                        : stationType === 'courthouse' ? 'courthouse'
+                        : 'shipyard';
 
+        // Hide unused tabs; show only the matching one
+        ['orbitTab', 'dockTab', 'shipyardTab', 'modulesTab', 'courthouseTab'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = (id === activeTabId) ? '' : 'none';
+        });
         document.querySelectorAll('.station-tab-button').forEach(btn => {
-            btn.classList.toggle('active', btn.id === `${this.stationTab}Tab`);
+            btn.classList.toggle('active', btn.id === activeTabId);
         });
 
         let contentHtml = '';
-
-        if (this.stationTab === 'orbit') {
-            contentHtml = `
-                <div class="station-section">
-                    <p>You are currently orbiting the station. Choose a tab to dock, repair, or visit the shipyard.</p>
-                </div>`;
-        } else if (this.stationTab === 'dock') {
-            const repairCost = currentShip ? CONSTANTS.REPAIR_COST : 0;
-            const modList = currentShip && currentShip.modules.length > 0
-                ? currentShip.modules.map(mod => {
-                    const m = CONSTANTS.MODULES.find(m => m.id === mod.id);
-                    return m ? m.name : mod.id;
-                  }).join(', ')
-                : 'None';
-            const builtinList = currentShip && (currentShip.builtinModules || []).length > 0
-                ? currentShip.builtinModules.map(id => {
-                    const m = CONSTANTS.MODULES.find(m => m.id === id);
-                    return m ? `<span style="color:#cc99ff;" data-tooltip="${m.desc}">${m.name}</span>` : id;
-                  }).join(', ')
-                : null;
-            contentHtml = `
-                <div class="station-section">
-                    ${currentShip ? `
-                        <p><strong>${currentShip.name || '?'}</strong> (${currentShip.shipType || '?'}) — Hull ${currentShip.hull}/${currentShip.maxHull}, Shields ${currentShip.shields}/${currentShip.maxShields}, Laser ${currentShip.laserDamage}, Engine ${currentShip.engine}</p>
-                        ${builtinList ? `<p style="color:#cc99ff;font-size:0.85em;margin-top:-0.5em;">Built-in: ${builtinList}</p>` : ''}
-                        <p style="color:#aaa;font-size:0.85em;margin-top:-0.5em;">Modules (${currentShip.modules.length}/${currentShip.moduleSlots}): ${modList}</p>
-                        <div class="station-action-row">
-                            <button id="repairButton" class="btn-primary">Repair Ship</button>
-                            <button id="sellButton" class="btn-secondary">Sell Ship</button>
-                        </div>
-                        <p class="station-note">Repair cost: ${repairCost} credits. Sell value: ${shipSaleValue} credits.</p>
-                    ` : '<p>No ship selected.</p>'}
-                </div>`;
-        } else if (this.stationTab === 'shipyard') {
+        if (this.stationTab === 'shipyard') {
             contentHtml = `
                 <div class="station-section">
                     ${this.renderOfferTable(this.currentStationOffer, this.selectedOfferIndex, currentShip ? shipSaleValue : 0)}
@@ -209,30 +174,9 @@ UISystem.updateStationScreen = function(gameState) {
 
 UISystem.setupStationButtons = function(gameState, currentShip, shipSaleValue) {
         const offer = this.currentStationOffer ? this.currentStationOffer[this.selectedOfferIndex] : null;
-        const repairButton = document.getElementById('repairButton');
         const sellButton = document.getElementById('sellButton');
         const buyButton = document.getElementById('buyButton');
         const tradeButton = document.getElementById('tradeButton');
-
-        if (repairButton) {
-            repairButton.disabled = !currentShip || gameState.credits < CONSTANTS.REPAIR_COST || currentShip.hull >= currentShip.maxHull;
-            repairButton.onclick = () => {
-                if (!currentShip) return;
-                const hullAfter = Math.min(currentShip.maxHull, currentShip.hull + CONSTANTS.REPAIR_AMOUNT);
-                this.showConfirmModal({
-                    title: 'Repair Ship',
-                    lines: [
-                        `Hull: ${currentShip.hull} / ${currentShip.maxHull} → ${hullAfter} / ${currentShip.maxHull}`,
-                        `Cost: ${CONSTANTS.REPAIR_COST} credits`,
-                    ],
-                    creditsBefore: gameState.credits,
-                    creditsAfter: gameState.credits - CONSTANTS.REPAIR_COST,
-                    onConfirm: () => {
-                        if (StationSystem.repairShip(gameState, currentShip)) this.updateStationScreen(gameState);
-                    }
-                });
-            };
-        }
 
         if (sellButton) {
             sellButton.disabled = !currentShip || gameState.playerShips.length <= 1;
@@ -426,13 +370,15 @@ UISystem.showConfirmModal = function({ title, lines, creditsBefore, creditsAfter
 };
 
 UISystem.generateNewShipStats = function() {
-        const typeData = CONSTANTS.SHIP_TYPES.filter(t => !t.internal)[Math.floor(Math.random() * CONSTANTS.SHIP_TYPES.filter(t => !t.internal).length)];
+        const available = CONSTANTS.SHIP_TYPES.filter(t => !t.internal);
+        const typeData  = available[Math.floor(Math.random() * available.length)];
+        const S = CONSTANTS.SHIP_STATS;
         return {
-            hull: Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.HULL_MIN, CONSTANTS.SHIP_STATS.HULL_MAX) * typeData.hullMult)),
-            shields: Math.max(0, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.SHIELDS_MIN, CONSTANTS.SHIP_STATS.SHIELDS_MAX) * typeData.shieldMult)),
-            laser: Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.LASER_MIN, CONSTANTS.SHIP_STATS.LASER_MAX) * typeData.laserMult)),
-            radar: Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.RADAR_MIN, CONSTANTS.SHIP_STATS.RADAR_MAX) * typeData.radarMult)),
-            engine: Math.max(5, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.ENGINE_MIN, CONSTANTS.SHIP_STATS.ENGINE_MAX) * typeData.engineMult)),
+            hull:    Math.max(1, Math.round((S.HULL_MIN    + S.HULL_MAX)    / 2 * typeData.hullMult)),
+            shields: Math.max(0, Math.round((S.SHIELDS_MIN + S.SHIELDS_MAX) / 2 * typeData.shieldMult)),
+            laser:   Math.max(1, Math.round((S.LASER_MIN   + S.LASER_MAX)   / 2 * typeData.laserMult)),
+            radar:   Math.max(1, Math.round((S.RADAR_MIN   + S.RADAR_MAX)   / 2 * typeData.radarMult)),
+            engine:  Math.max(5, Math.round((S.ENGINE_MIN  + S.ENGINE_MAX)  / 2 * typeData.engineMult)),
             type: typeData.type,
         };
 };

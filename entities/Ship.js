@@ -22,13 +22,14 @@ class Ship {
             this.shipType = typeData.type;
             this.name = typeData.type;
 
-            this.maxHull = Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.HULL_MIN, CONSTANTS.SHIP_STATS.HULL_MAX) * typeData.hullMult));
+            const S = CONSTANTS.SHIP_STATS;
+            this.maxHull = Math.max(1, Math.round((S.HULL_MIN + S.HULL_MAX) / 2 * typeData.hullMult));
             this.hull = this.maxHull;
-            this.maxShields = Math.max(0, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.SHIELDS_MIN, CONSTANTS.SHIP_STATS.SHIELDS_MAX) * typeData.shieldMult));
+            this.maxShields = Math.max(0, Math.round((S.SHIELDS_MIN + S.SHIELDS_MAX) / 2 * typeData.shieldMult));
             this.shields = this.maxShields;
-            this.laserDamage = Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.LASER_MIN, CONSTANTS.SHIP_STATS.LASER_MAX) * typeData.laserMult));
-            this.radar = Math.max(1, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.RADAR_MIN, CONSTANTS.SHIP_STATS.RADAR_MAX) * typeData.radarMult));
-            this.engine = Math.max(5, Math.round(generateRandomStats(CONSTANTS.SHIP_STATS.ENGINE_MIN, CONSTANTS.SHIP_STATS.ENGINE_MAX) * typeData.engineMult));
+            this.laserDamage = Math.max(1, Math.round((S.LASER_MIN + S.LASER_MAX) / 2 * typeData.laserMult));
+            this.radar = Math.max(1, Math.round((S.RADAR_MIN + S.RADAR_MAX) / 2 * typeData.radarMult));
+            this.engine = Math.max(5, Math.round((S.ENGINE_MIN + S.ENGINE_MAX) / 2 * typeData.engineMult));
         }
         
         // Combat state

@@ -261,17 +261,13 @@ class UISystem {
                 const connected = gameState.systems.find(s => s.id === id);
                 return connected ? connected.name : null;
             }).filter(Boolean).join(', ') || 'None';
-            const venues = [];
-            if (sys.hasRepair)     venues.push('Dock');
-            if (sys.hasShipyard)   venues.push('Shipyard');
-            if (sys.hasMechanic)   venues.push('Mechanic');
-            if (sys.hasCourthouse) venues.push('Courthouse');
+            const stationLabel = { shipyard: 'Shipyard', mechanic: 'Mechanic', courthouse: 'Courthouse' }[sys.stationType] || 'None';
             content.innerHTML = `
                 <div class="station-section">
                     <p><strong>Status:</strong> Visited</p>
                     <p><strong>Tier:</strong> ${sys.tier}</p>
                     <p><strong>Routes forward:</strong> ${connections}</p>
-                    <p><strong>Venues:</strong> ${venues.join(', ') || 'None'}</p>
+                    <p><strong>Station:</strong> ${stationLabel}</p>
                 </div>`;
         } else {
             content.innerHTML = `

@@ -50,11 +50,10 @@ class SpaceTravel {
                     parentId: null,
                     isQueenPlanet: tier === QUEEN_TIER,
 
-                    // Every non-queen system has a dock (repair)
-                    hasRepair:     tier < QUEEN_TIER,
-                    hasShipyard:   tier < QUEEN_TIER && Math.random() < lerp(CONSTANTS.VENUE_SHIPYARD_BASE,   CONSTANTS.VENUE_SHIPYARD_MAX),
-                    hasMechanic:   tier < QUEEN_TIER && Math.random() < lerp(CONSTANTS.VENUE_MECHANIC_BASE,   CONSTANTS.VENUE_MECHANIC_MAX),
-                    hasCourthouse: tier < QUEEN_TIER && Math.random() < lerp(CONSTANTS.VENUE_COURTHOUSE_BASE, CONSTANTS.VENUE_COURTHOUSE_MAX),
+                    // Each non-queen system is exactly one type of station
+                    stationType: tier < QUEEN_TIER
+                        ? ['shipyard', 'mechanic', 'courthouse'][Math.floor(Math.random() * 3)]
+                        : null,
                 };
 
                 byTier[tier].push(sys);
@@ -140,12 +139,44 @@ class SpaceTravel {
             aliens:    alienWeight,
         };
 
-        // Hazard intensity scales with tier (fed to combat in a future pass)
-        const hazardChance = 0.1 + tierFrac * 0.7;
+        // Hazard flags — rolled once per route, applied to every encounter on that route.
+        // Tier 0–1: no hazards. Scales to 33/33/33 (0/1/2) at mid-tier, 100% 2 at queen tier.
+        // 2 hazards = asteroids + cloud; 1 hazard = one of the two chosen randomly.
+        let hasAsteroids = false;
+        let cloudType    = null;
+
+        if (destinationTier > 1) {
+            const scaledFrac = (destinationTier - 1) / (QUEEN_TIER - 1); // 0 at tier 2, 1 at QUEEN_TIER
+            let p0, p1, p2;
+            if (scaledFrac <= 0.5) {
+                const t = scaledFrac * 2;                // 0 → 1 over lower half
+                p0 = 1 - t * (2 / 3);
+                p1 = t * (1 / 3);
+                p2 = t * (1 / 3);
+            } else {
+                const t = (scaledFrac - 0.5) * 2;       // 0 → 1 over upper half
+                p0 = (1 / 3) * (1 - t);
+                p1 = (1 / 3) * (1 - t);
+                p2 = 1 / 3 + t * (2 / 3);
+            }
+            const roll = Math.random();
+            const hazardCount = roll < p2 ? 2 : roll < p2 + p1 ? 1 : 0;
+            const cloudTypes = CONSTANTS.CLOUD_TYPES;
+            if (hazardCount === 2) {
+                hasAsteroids = true;
+                cloudType = cloudTypes[Math.floor(Math.random() * cloudTypes.length)];
+            } else if (hazardCount === 1) {
+                if (Math.random() < 0.5) {
+                    hasAsteroids = true;
+                } else {
+                    cloudType = cloudTypes[Math.floor(Math.random() * cloudTypes.length)];
+                }
+            }
+        }
 
         const isQueenRoute = destinationTier === QUEEN_TIER;
 
-        const rd = { destinationTier, fleetStrength: strength, maxEncounters, factionWeights, hazardChance, isQueenRoute };
+        const rd = { destinationTier, fleetStrength: strength, maxEncounters, factionWeights, isQueenRoute, hasAsteroids, cloudType };
         // Pre-roll fleets so they're visible on the galaxy map before travel
         rd.fleets = this.rollEncountersForRoute(rd);
         return rd;

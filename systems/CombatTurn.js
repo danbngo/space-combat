@@ -114,7 +114,11 @@ Combat.prototype.resolveEnemyActions = function() {
                 } else {
                     AISystem.decideAction(ship, self.playerShips, self);
                 }
-                setTimeout(doAction, CONSTANTS.AI_DECISION_DELAY);
+                const waitNext = () => {
+                    if (self.isAnimating()) { setTimeout(waitNext, 50); return; }
+                    doAction();
+                };
+                setTimeout(waitNext, CONSTANTS.AI_DECISION_DELAY);
             }
 
             doAction();
@@ -445,7 +449,7 @@ Combat.prototype.endEnemyTurn = function() {
             }
         });
 
-        // Hull and shield regen modules
+        // Hull and shield regen (modules + flat +1 shield for all ships)
         [...this.playerShips, ...this.enemyShips].forEach(ship => {
             if (!ship.alive) return;
             if ((ship.hullRegenPerRound || 0) > 0 && ship.hull < ship.maxHull) {
@@ -454,8 +458,10 @@ Combat.prototype.endEnemyTurn = function() {
                 this.addFloatingText(`+${regen}`, '#88ff88', ship.x, ship.y - 12);
                 this.addLog(`${this._shipLabel(ship)}: hull regen +${regen}`);
             }
-            if ((ship.shieldRegenPerRound || 0) > 0 && ship.shields < ship.maxShields) {
-                const regen = Math.min(ship.shieldRegenPerRound, ship.maxShields - ship.shields);
+            if (ship.shields < ship.maxShields) {
+                const moduleRegen = ship.shieldRegenPerRound || 0;
+                const totalRegen  = moduleRegen + 1;   // flat +1 for all ships
+                const regen = Math.min(totalRegen, ship.maxShields - ship.shields);
                 ship.shields += regen;
                 this.addFloatingText(`+${regen}`, '#4488ff', ship.x, ship.y - 16);
                 this.addLog(`${this._shipLabel(ship)}: shield regen +${regen}`);

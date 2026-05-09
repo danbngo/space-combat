@@ -93,7 +93,9 @@ class Combat {
     }
 
     initAsteroids() {
-        if (Math.random() > CONSTANTS.ASTEROID_SPAWN_CHANCE) return;
+        // If a route flag is set, use it directly; otherwise fall back to random chance
+        if (this.options.hasAsteroids === false) return;
+        if (this.options.hasAsteroids !== true && Math.random() > CONSTANTS.ASTEROID_SPAWN_CHANCE) return;
         const count = randomInt(CONSTANTS.ASTEROID_MIN_COUNT, CONSTANTS.ASTEROID_MAX_COUNT);
         const placed = [];
 
@@ -119,9 +121,15 @@ class Combat {
     }
 
     initClouds() {
-        if (Math.random() > CONSTANTS.CLOUD_SPAWN_CHANCE) return;
-        const types = CONSTANTS.CLOUD_TYPES;
-        this.cloudType = types[Math.floor(Math.random() * types.length)];
+        // If a route cloud flag is set use it; null = no clouds; undefined = random fallback
+        if (this.options.cloudType === null) return;
+        if (this.options.cloudType !== undefined) {
+            this.cloudType = this.options.cloudType;
+        } else {
+            if (Math.random() > CONSTANTS.CLOUD_SPAWN_CHANCE) return;
+            const types = CONSTANTS.CLOUD_TYPES;
+            this.cloudType = types[Math.floor(Math.random() * types.length)];
+        }
         const count = randomInt(CONSTANTS.CLOUD_MIN_COUNT, CONSTANTS.CLOUD_MAX_COUNT);
 
         for (let n = 0; n < count; n++) {

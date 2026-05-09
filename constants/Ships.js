@@ -90,7 +90,7 @@ const CONSTANTS_SHIPS = {
             vertices: [[1.5, 0], [0.3, -0.8], [-0.8, -0.5], [-0.8, 0.5], [0.3, 0.8]],
         },
         {
-            type: 'Smuggler',
+            type: 'Blockade Runner',
             description: 'Quick and elusive, designed to slip through enemy lines. Built-in Flash Emitter can temporarily blind entire groups, letting it strike and vanish.',
             sizeMult: 0.90,
             hullMult: 0.75, shieldMult: 0.6, laserMult: 1.0, radarMult: 1.3, engineMult: 1.5,
@@ -210,7 +210,7 @@ const CONSTANTS_SHIPS = {
             name: 'Pirates',
             description: 'Criminal syndicates raiding shipping lanes for profit. Always hostile on sight. Standard credit bounty on defeat.',
             color: '#ff4444',
-            shipTypes: ['Raider', 'Fighter', 'Smuggler', 'Destroyer'],
+            shipTypes: ['Raider', 'Fighter', 'Blockade Runner', 'Destroyer'],
             creditMult: 1,
         },
         {
@@ -242,7 +242,7 @@ const CONSTANTS_SHIPS = {
             name: 'Smugglers',
             description: 'Contraband runners evading law enforcement. Well-armed if cornered. Defeating them yields high credits.',
             color: '#aa44ff',
-            shipTypes: ['Smuggler', 'Freighter', 'Corvette', 'Scout'],
+            shipTypes: ['Blockade Runner', 'Freighter', 'Corvette', 'Scout'],
             creditMult: 2,
         },
         {
@@ -258,8 +258,8 @@ const CONSTANTS_SHIPS = {
     // Tiered ship pools per faction — used with fleet strength (low=1-3, mid=4-6, high=7-10)
     FACTION_SHIP_POOLS: {
         pirates:   {
-            low:  ['Fighter', 'Smuggler'],
-            mid:  ['Raider', 'Fighter', 'Smuggler'],
+            low:  ['Fighter', 'Blockade Runner'],
+            mid:  ['Raider', 'Fighter', 'Blockade Runner'],
             high: ['Raider', 'Destroyer', 'Corvette'],
         },
         merchants: {
@@ -278,9 +278,9 @@ const CONSTANTS_SHIPS = {
             high: ['Destroyer', 'Battleship', 'Carrier'],
         },
         smugglers: {
-            low:  ['Smuggler', 'Scout'],
-            mid:  ['Smuggler', 'Raider', 'Scout'],
-            high: ['Smuggler', 'Hijacker', 'Raider'],
+            low:  ['Blockade Runner', 'Scout'],
+            mid:  ['Blockade Runner', 'Raider', 'Scout'],
+            high: ['Blockade Runner', 'Hijacker', 'Raider'],
         },
         aliens:    {
             low:  ['Alien Phantom'],

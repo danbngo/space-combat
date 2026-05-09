@@ -496,13 +496,13 @@ class GalaxyRenderer {
         if (!tooltip) return;
         const routeData = (typeof gameState !== 'undefined' && gameState.routes)
             ? gameState.routes.get(route.routeKey) : null;
-        const isCurrentRoute = currentSystem && currentSystem.id === route.from.id
-            && currentSystem.connections && currentSystem.connections.includes(route.to.id);
-        const tierLabel = route.to.isQueenPlanet ? 'Alien Queen\'s Lair' : `Tier ${route.to.tier}`;
-        let html = `<strong>${route.from.name} → ${route.to.name}</strong><br>${tierLabel}`;
+        const tierLabel = route.to.isQueenPlanet ? 'Queen\'s Lair' : `Tier ${route.to.tier}`;
+
+        let html = `<strong>${route.from.name} → ${route.to.name}</strong>`;
         if (routeData) {
             const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
-            html += `<br>Threat: ${strLabel} (${routeData.fleetStrength}/10) · 1–${routeData.maxEncounters} encounters`;
+            const encLabel = routeData.maxEncounters === 1 ? '1 enc.' : `1–${routeData.maxEncounters} enc.`;
+            html += `<br>${tierLabel} · ${strLabel} threat · ${encLabel}`;
             const topFactions = Object.entries(routeData.factionWeights)
                 .filter(([, w]) => w > 5).sort(([, a], [, b]) => b - a).slice(0, 2);
             if (topFactions.length) {
@@ -512,12 +512,31 @@ class GalaxyRenderer {
                 });
                 html += `<br>${names.join(', ')}`;
             }
+            const hazards = [];
+            if (routeData.hasAsteroids) hazards.push('Asteroids');
+            if (routeData.cloudType) hazards.push(`${routeData.cloudType.charAt(0).toUpperCase() + routeData.cloudType.slice(1)} clouds`);
+            html += `<br>Hazards: ${hazards.length ? `<span style="color:#ffcc44;">${hazards.join(', ')}</span>` : '<span style="color:#666;">None</span>'}`;
+        } else {
+            html += `<br>${tierLabel}`;
         }
-        if (isCurrentRoute) html += `<br><span style="color:#88ff88;">Click to select · Travel button to depart</span>`;
+
         tooltip.innerHTML = html;
-        tooltip.style.left = (this.mouseX + 10) + 'px';
-        tooltip.style.top = (this.mouseY + 10) + 'px';
         tooltip.style.display = 'block';
+
+        // Position tooltip — flip left/above if near canvas edges
+        const tw = tooltip.offsetWidth  || 180;
+        const th = tooltip.offsetHeight || 70;
+        const cx = this.canvas.getBoundingClientRect ? this.canvas.getBoundingClientRect().left : 0;
+        const cy = this.canvas.getBoundingClientRect ? this.canvas.getBoundingClientRect().top  : 0;
+        const cw = this.canvas.clientWidth  || this.canvas.width;
+        const ch = this.canvas.clientHeight || this.canvas.height;
+        const absX = this.mouseX;
+        const absY = this.mouseY;
+        const gap = 12;
+        const left = (absX + gap + tw > cw) ? absX - tw - gap : absX + gap;
+        const top  = (absY + gap + th > ch) ? absY - th - gap : absY + gap;
+        tooltip.style.left = left + 'px';
+        tooltip.style.top  = top  + 'px';
     }
 
     render(systems, currentSystem) {
@@ -725,21 +744,39 @@ class GalaxyRenderer {
         this.ctx.stroke();
     }
     
+    // Draw a station shape: 'circle' | 'diamond' | 'triangle'
+    _drawStationShape(x, y, r, shape) {
+        this.ctx.beginPath();
+        if (shape === 'diamond') {
+            this.ctx.moveTo(x,     y - r);
+            this.ctx.lineTo(x + r, y);
+            this.ctx.lineTo(x,     y + r);
+            this.ctx.lineTo(x - r, y);
+        } else if (shape === 'triangle') {
+            this.ctx.moveTo(x,                    y - r);
+            this.ctx.lineTo(x + r * 0.866,        y + r * 0.5);
+            this.ctx.lineTo(x - r * 0.866,        y + r * 0.5);
+        } else {
+            this.ctx.arc(x, y, r, 0, Math.PI * 2);
+        }
+        this.ctx.closePath();
+    }
+
     drawSystem(system, isReachable, isHovered, isSelected, isCurrent, isTransitOrigin = false) {
         const zoomedScaleX = this.scaleX * this.zoom;
         const zoomedScaleY = this.scaleY * this.zoom;
         const x = this.translateX + system.x * zoomedScaleX;
         const y = this.translateY + system.y * zoomedScaleY;
-        const fixedRadius = CONSTANTS.GALAXY_SYSTEM_RADIUS;
+        const r = CONSTANTS.GALAXY_SYSTEM_RADIUS;
 
         if (!system.seen) {
             if (!this.visibleUnseenIds.has(system.id)) return;
             this.ctx.fillStyle = '#2a2a44';
             this.ctx.beginPath();
-            this.ctx.arc(x, y, fixedRadius, 0, Math.PI * 2);
+            this.ctx.arc(x, y, r, 0, Math.PI * 2);
             this.ctx.fill();
             this.ctx.fillStyle = '#6666aa';
-            this.ctx.font = `bold ${Math.round(fixedRadius * 1.4)}px Courier New`;
+            this.ctx.font = `bold ${Math.round(r * 1.4)}px Courier New`;
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
             this.ctx.fillText('?', x, y);
@@ -747,54 +784,49 @@ class GalaxyRenderer {
             this.ctx.textBaseline = 'alphabetic';
             return;
         }
-        
-        // Determine color based on new scheme
+
+        // Shape and base color by station type
+        const stationShape = { shipyard: 'circle', mechanic: 'diamond', courthouse: 'triangle' };
+        const stationBaseColor = { shipyard: '#4488ff', mechanic: '#ffaa00', courthouse: '#cc66ff' };
+        const shape = system.isQueenPlanet ? 'circle' : (stationShape[system.stationType] || 'circle');
+        const baseColor = system.isQueenPlanet ? '#ff4400' : (stationBaseColor[system.stationType] || '#808080');
+
+        // State-driven color overlay
         let color;
-        if (system.isQueenPlanet) {
-            color = isHovered ? '#ffcc00' : '#ff4400'; // orange-red for queen lair
-        } else if (isHovered) {
-            color = '#ffffff';
-        } else if (isTransitOrigin) {
-            color = '#1a5c1a';
-        } else if (isCurrent) {
-            color = '#00ff00';
-        } else if (isReachable) {
-            color = '#c0c0c0';
-        } else {
-            color = '#808080';
-        }
-        
-        // Draw system circle with fixed size
+        if (isHovered)        color = '#ffffff';
+        else if (isCurrent)   color = '#00ff00';
+        else if (isTransitOrigin) color = '#1a5c1a';
+        else if (isReachable) color = baseColor;
+        else                  color = system.isQueenPlanet ? '#ff4400' : '#555577';
+
+        // Fill shape
         this.ctx.fillStyle = color;
-        this.ctx.beginPath();
-        this.ctx.arc(x, y, fixedRadius, 0, Math.PI * 2);
+        this._drawStationShape(x, y, r, shape);
         this.ctx.fill();
-        
-        // Draw outer ring if selected
+
+        // Selected ring
         if (isSelected) {
             this.ctx.strokeStyle = '#00ffff';
             this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-            this.ctx.arc(x, y, fixedRadius + 4, 0, Math.PI * 2);
-            this.ctx.stroke();
-        }
-        
-        // Draw outer ring if hovered
-        if (isHovered) {
-            this.ctx.strokeStyle = '#ffffff';
-            this.ctx.lineWidth = 1.5;
-            this.ctx.beginPath();
-            this.ctx.arc(x, y, fixedRadius + 3, 0, Math.PI * 2);
+            this._drawStationShape(x, y, r + 4, shape);
             this.ctx.stroke();
         }
 
-        // Pulsing ring for the alien queen's planet
+        // Hover ring
+        if (isHovered) {
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.lineWidth = 1.5;
+            this._drawStationShape(x, y, r + 3, shape);
+            this.ctx.stroke();
+        }
+
+        // Pulsing ring for alien queen's lair
         if (system.isQueenPlanet) {
             const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 400);
             this.ctx.strokeStyle = `rgba(255, 68, 0, ${pulse})`;
             this.ctx.lineWidth = 2;
             this.ctx.beginPath();
-            this.ctx.arc(x, y, fixedRadius + 7, 0, Math.PI * 2);
+            this.ctx.arc(x, y, r + 7, 0, Math.PI * 2);
             this.ctx.stroke();
         }
     }
@@ -804,37 +836,33 @@ class GalaxyRenderer {
         if (!tooltip) return;
 
         if (!system.seen) {
-            tooltip.innerHTML = `<strong>Unknown System</strong><br>Unexplored territory`;
-            tooltip.style.left = (this.mouseX + 10) + 'px';
-            tooltip.style.top = (this.mouseY + 10) + 'px';
-            tooltip.style.display = 'block';
-            return;
-        }
-
-        const isConnected = currentSystem.connections && currentSystem.connections.includes(system.id);
-        const tierLabel = system.isQueenPlanet ? 'Alien Queen\'s lair' : `Tier ${system.tier}`;
-
-        let html = `<strong>${system.name}</strong><br>`;
-        html += `${tierLabel}<br>`;
-        if (system.visited) {
-            const venues = [];
-            if (system.hasRepair)     venues.push('Dock');
-            if (system.hasShipyard)   venues.push('Shipyard');
-            if (system.hasMechanic)   venues.push('Mechanic');
-            if (system.hasCourthouse) venues.push('Courthouse');
-            html += venues.length ? venues.join(' · ') : 'No venues';
-        } else if (isConnected) {
-            html += 'Click to travel here';
+            tooltip.innerHTML = `<strong>Unknown Region</strong><br>Unexplored territory`;
         } else {
-            html += system.visited ? 'Visited' : 'Not yet visited';
+            const tierLabel = system.isQueenPlanet ? 'Alien Queen\'s Lair' : `Tier ${system.tier}`;
+            const stationLabel = {
+                shipyard:   '⬡ Shipyard Station',
+                mechanic:   '◆ Mechanic Station',
+                courthouse: '▲ Courthouse Station',
+            }[system.stationType] || '';
+            const stationColor = {
+                shipyard:   '#4488ff',
+                mechanic:   '#ffaa00',
+                courthouse: '#cc66ff',
+            }[system.stationType] || '#aaa';
+
+            let html = `<strong>${system.name}</strong><br>${tierLabel}`;
+            if (stationLabel) html += `<br><span style="color:${stationColor}">${stationLabel}</span>`;
+            tooltip.innerHTML = html;
         }
 
-        tooltip.innerHTML = html;
-
-        // Position tooltip at mouse
-        tooltip.style.left = (this.mouseX + 10) + 'px';
-        tooltip.style.top = (this.mouseY + 10) + 'px';
         tooltip.style.display = 'block';
+        const tw = tooltip.offsetWidth  || 160;
+        const th = tooltip.offsetHeight || 50;
+        const cw = this.canvas.clientWidth  || this.canvas.width;
+        const ch = this.canvas.clientHeight || this.canvas.height;
+        const gap = 12;
+        tooltip.style.left = ((this.mouseX + gap + tw > cw) ? this.mouseX - tw - gap : this.mouseX + gap) + 'px';
+        tooltip.style.top  = ((this.mouseY + gap + th > ch) ? this.mouseY - th - gap : this.mouseY + gap) + 'px';
     }
     
     hideTooltip() {
@@ -1024,21 +1052,34 @@ class GalaxyRenderer {
     drawFleetTooltip(hoveredFleetInfo) {
         const tooltip = document.getElementById('systemTooltip');
         if (!tooltip) return;
-        const { fleet } = hoveredFleetInfo;
+        const { fleet, routeKey } = hoveredFleetInfo;
         const factionData = CONSTANTS.FACTIONS.find(f => f.id === fleet.faction);
         const factionName = factionData ? factionData.name : fleet.faction;
         const factionColor = factionData ? factionData.color : '#ffffff';
         const threatLabel = fleet.fleetStrength <= 3 ? 'Low' : fleet.fleetStrength <= 6 ? 'Medium' : 'High';
 
+        const routeData = routeKey && gameState && gameState.routes ? gameState.routes.get(routeKey) : null;
+        const hazards = [];
+        if (routeData) {
+            if (routeData.hasAsteroids) hazards.push('Asteroids');
+            if (routeData.cloudType) hazards.push(`${routeData.cloudType.charAt(0).toUpperCase() + routeData.cloudType.slice(1)} clouds`);
+        }
+
         let html = `<strong style="color:${factionColor}">${factionName} Fleet</strong><br>`;
         html += `${fleet.size} ships · ${fleet.leaderType}<br>`;
         html += `Threat: ${threatLabel} (${fleet.fleetStrength}/10)`;
         if (fleet.isQueenFight) html += `<br><span style="color:#ff4400;">Alien Queen — Boss Fight</span>`;
+        if (hazards.length > 0) html += `<br><span style="color:#ffcc44;">Hazards: ${hazards.join(', ')}</span>`;
 
         tooltip.innerHTML = html;
-        tooltip.style.left = (this.mouseX + 10) + 'px';
-        tooltip.style.top = (this.mouseY + 10) + 'px';
         tooltip.style.display = 'block';
+        const tw2 = tooltip.offsetWidth  || 160;
+        const th2 = tooltip.offsetHeight || 60;
+        const cw2 = this.canvas.clientWidth  || this.canvas.width;
+        const ch2 = this.canvas.clientHeight || this.canvas.height;
+        const gap2 = 12;
+        tooltip.style.left = ((this.mouseX + gap2 + tw2 > cw2) ? this.mouseX - tw2 - gap2 : this.mouseX + gap2) + 'px';
+        tooltip.style.top  = ((this.mouseY + gap2 + th2 > ch2) ? this.mouseY - th2 - gap2 : this.mouseY + gap2) + 'px';
     }
 
     clearSelection() {
