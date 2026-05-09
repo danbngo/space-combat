@@ -187,14 +187,20 @@ function isInTractorBeamCone(puller, target) {
     return Math.abs(localAngle) <= CONSTANTS.TRACTOR_BEAM_HALF_ANGLE;
 }
 
-// Returns true if target is within the port or starboard firing triangle of shooter.
-// Triangles are centered at ±90° (perpendicular) from the ship's facing direction.
+// Returns true if target is within the ship's firing zone.
+// Alien ships fire from port/starboard side triangles; human ships fire in a forward cone.
 function isInFiringZone(shooter, target) {
     const angleToTarget = Math.atan2(target.y - shooter.y, target.x - shooter.x);
     const localAngle = normalizeAngle(angleToTarget - shooter.rotation);
-    const portDiff  = Math.abs(normalizeAngle(localAngle + Math.PI / 2));
-    const stbdDiff  = Math.abs(normalizeAngle(localAngle - Math.PI / 2));
-    return Math.min(portDiff, stbdDiff) <= CONSTANTS.SHOOTING_ZONE_HALF_ANGLE;
+    if (shooter.shipType && shooter.shipType.startsWith('Alien')) {
+        // Alien: port & starboard side triangles at ±90°
+        const portDiff = Math.abs(normalizeAngle(localAngle + Math.PI / 2));
+        const stbdDiff = Math.abs(normalizeAngle(localAngle - Math.PI / 2));
+        return Math.min(portDiff, stbdDiff) <= CONSTANTS.SHOOTING_ZONE_HALF_ANGLE;
+    } else {
+        // Human: forward cone centered on facing direction
+        return Math.abs(localAngle) <= CONSTANTS.SHOOTING_ZONE_HALF_ANGLE;
+    }
 }
 
 function getRouteKey(id1, id2) {

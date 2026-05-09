@@ -566,9 +566,9 @@ const GameController = {
                 return;
             }
             const activeShip     = combat.playerShips[combat.currentShipIndex];
-            const clickedShip    = combat.getShipAtPosition(wx, wy);
-            const clickedAsteroid = combat.getAsteroidAtPosition(wx, wy);
             const mode           = combat.playerMode;
+            const clickedShip    = combat.getShipAtPosition(wx, wy, mode);
+            const clickedAsteroid = mode === 'salvage' ? null : combat.getAsteroidAtPosition(wx, wy);
 
             console.log(`[click] mode=${mode || 'none'} at (${wx.toFixed(0)},${wy.toFixed(0)}) active=${activeShip?.name}(act=${activeShip?.actionsRemaining}) clicked=${clickedShip ? clickedShip.name + (clickedShip.isPlayer ? '[P]' : '[E]') : 'empty'} asteroid=${!!clickedAsteroid}`);
 
@@ -749,13 +749,46 @@ const GameController = {
                     console.log(`[click] → playerFlash at (${tx.toFixed(0)},${ty.toFixed(0)})`);
                     combat.playerFlash(activeShip, tx, ty);
                 }
-            } else if (mode === 'hack') {
+            } else if (mode === 'possess') {
                 if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && clickedShip !== activeShip) {
                     const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
-                    if (dist <= CONSTANTS.HACK_RANGE) {
-                        console.log(`[click] → playerHack ${clickedShip.name}`);
-                        combat.playerHack(activeShip, clickedShip);
+                    if (dist <= CONSTANTS.POSSESS_RANGE) {
+                        console.log(`[click] → playerPossess ${clickedShip.name}`);
+                        combat.playerPossess(activeShip, clickedShip);
                     }
+                }
+            } else if (mode === 'webbing') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    const dist = distance(activeShip.x, activeShip.y, wx, wy);
+                    const tx = dist > CONSTANTS.WEBBING_RANGE ? activeShip.x + (wx - activeShip.x) / dist * CONSTANTS.WEBBING_RANGE : wx;
+                    const ty = dist > CONSTANTS.WEBBING_RANGE ? activeShip.y + (wy - activeShip.y) / dist * CONSTANTS.WEBBING_RANGE : wy;
+                    console.log(`[click] → playerWebbing at (${tx.toFixed(0)},${ty.toFixed(0)})`);
+                    combat.playerWebbing(activeShip, tx, ty);
+                }
+            } else if (mode === 'timeslip') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && clickedShip !== activeShip) {
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    if (dist <= CONSTANTS.TIMESLIP_RANGE && !(clickedShip.timeslipTurns || 0)) {
+                        console.log(`[click] → playerTimeslip ${clickedShip.name}`);
+                        combat.playerTimeslip(activeShip, clickedShip);
+                    }
+                }
+            } else if (mode === 'salvage') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && !clickedShip.alive) {
+                    console.log(`[click] → playerSalvage ${clickedShip.name}`);
+                    combat.playerSalvage(activeShip, clickedShip);
+                }
+            } else if (mode === 'neutralize') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    const launchDist = CONSTANTS.WARHEAD_LAUNCH_DIST;
+                    const targetRadius = CONSTANTS.WARHEAD_TARGET_RADIUS;
+                    const acx = activeShip.x + Math.cos(activeShip.rotation) * launchDist;
+                    const acy = activeShip.y + Math.sin(activeShip.rotation) * launchDist;
+                    const d = distance(acx, acy, wx, wy);
+                    const tx = d > targetRadius ? acx + (wx - acx) / d * targetRadius : wx;
+                    const ty = d > targetRadius ? acy + (wy - acy) / d * targetRadius : wy;
+                    console.log(`[click] → playerNeutralize at (${tx.toFixed(0)},${ty.toFixed(0)})`);
+                    combat.playerNeutralize(activeShip, tx, ty);
                 }
             } else if (mode === 'mark') {
                 if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && clickedShip !== activeShip) {
@@ -812,6 +845,33 @@ const GameController = {
                         console.log(`[click] → playerSiphon ${clickedShip.name}`);
                         combat.playerSiphon(activeShip, clickedShip);
                     }
+                }
+            } else if (mode === 'swap') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && clickedShip !== activeShip) {
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    if (dist <= CONSTANTS.SWAP_RANGE) {
+                        console.log(`[click] → playerSwap ${clickedShip.name}`);
+                        combat.playerSwap(activeShip, clickedShip);
+                    }
+                }
+            } else if (mode === 'absorb') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    console.log(`[click] → playerAbsorb`);
+                    combat.playerAbsorb(activeShip);
+                }
+            } else if (mode === 'ravager') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0 && clickedShip && !clickedShip.isPlayer) {
+                    const dist = distance(activeShip.x, activeShip.y, clickedShip.x, clickedShip.y);
+                    const ravRange = combat.getShootRange(activeShip) * CONSTANTS.RAVAGER_RANGE_MULT;
+                    if (dist <= ravRange && isInFiringZone(activeShip, clickedShip)) {
+                        console.log(`[click] → playerRavager ${clickedShip.name}`);
+                        combat.playerRavager(activeShip, clickedShip);
+                    }
+                }
+            } else if (mode === 'stasis_field') {
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    console.log(`[click] → playerStasisField ${wx.toFixed(0)},${wy.toFixed(0)}`);
+                    combat.playerStasisField(activeShip, wx, wy);
                 }
             } else {
                 // Default: select only

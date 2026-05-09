@@ -182,13 +182,128 @@ class AISystem {
         const alivePlayerShips = playerShips.filter(s => s.alive && !s.cloaked);
         if (alivePlayerShips.length === 0) return;
 
-        // Hack AI: hack nearest player ship in HACK_RANGE
-        if (aiShip.specialMoves && aiShip.specialMoves.includes('hack')) {
-            const cd = (aiShip.specialMoveCooldowns || {})['hack'] || 0;
+        // Possess AI: possess nearest player ship in POSSESS_RANGE
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('possess')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['possess'] || 0;
             if (cd === 0) {
-                const hackTarget = alivePlayerShips.find(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.HACK_RANGE);
-                if (hackTarget) {
-                    combat.playerHack(aiShip, hackTarget);
+                const target = alivePlayerShips.find(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.POSSESS_RANGE);
+                if (target) {
+                    combat.playerPossess(aiShip, target);
+                    return;
+                }
+            }
+        }
+
+        // Swarm AI: release swarm when any player is nearby
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('swarm')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['swarm'] || 0;
+            if (cd === 0 && alivePlayerShips.length > 0) {
+                combat.playerSwarm(aiShip);
+                return;
+            }
+        }
+
+        // Webbing AI: web when 2+ players nearby
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('webbing')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['webbing'] || 0;
+            if (cd === 0) {
+                const nearby = alivePlayerShips.filter(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.WEBBING_RANGE * 1.5);
+                if (nearby.length >= 2) {
+                    const cx = nearby.reduce((a, s) => a + s.x, 0) / nearby.length;
+                    const cy = nearby.reduce((a, s) => a + s.y, 0) / nearby.length;
+                    const d = distance(aiShip.x, aiShip.y, cx, cy);
+                    const tx = d > CONSTANTS.WEBBING_RANGE ? aiShip.x + (cx - aiShip.x) / d * CONSTANTS.WEBBING_RANGE : cx;
+                    const ty = d > CONSTANTS.WEBBING_RANGE ? aiShip.y + (cy - aiShip.y) / d * CONSTANTS.WEBBING_RANGE : cy;
+                    combat.playerWebbing(aiShip, tx, ty);
+                    return;
+                }
+            }
+        }
+
+        // Timeslip AI: target nearest player not already slipped
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('timeslip')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['timeslip'] || 0;
+            if (cd === 0) {
+                const target = alivePlayerShips.find(s =>
+                    distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.TIMESLIP_RANGE && !(s.timeslipTurns || 0)
+                );
+                if (target) {
+                    combat.playerTimeslip(aiShip, target);
+                    return;
+                }
+            }
+        }
+
+        // Frenzy AI: frenzy when hull low or allies nearby
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('frenzy')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['frenzy'] || 0;
+            if (cd === 0 && !(aiShip.frenzyTurns || 0)) {
+                const hullPct = aiShip.hull / aiShip.maxHull;
+                const alliesNearby = combat.enemyShips.filter(s => s.alive && s !== aiShip && !s.isSwarmlet && !s.isTorpedo && distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.FRENZY_RANGE);
+                if (hullPct < 0.4 || alliesNearby.length >= 2) {
+                    combat.playerFrenzy(aiShip);
+                    return;
+                }
+            }
+        }
+
+        // Torpedo AI: launch torpedo when players in general vicinity
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('torpedo')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['torpedo'] || 0;
+            if (cd === 0 && alivePlayerShips.length > 0) {
+                const nearestPlayer = alivePlayerShips.reduce((a, b) =>
+                    distance(aiShip.x, aiShip.y, a.x, a.y) < distance(aiShip.x, aiShip.y, b.x, b.y) ? a : b
+                );
+                if (distance(aiShip.x, aiShip.y, nearestPlayer.x, nearestPlayer.y) < 200) {
+                    combat.playerTorpedo(aiShip);
+                    return;
+                }
+            }
+        }
+
+        // Neutralize AI: fire at centroid of players clustered in range
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('neutralize')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['neutralize'] || 0;
+            if (cd === 0) {
+                const launchDist = CONSTANTS.WARHEAD_LAUNCH_DIST;
+                const blastR     = CONSTANTS.NEUTRALIZE_BLAST_RADIUS;
+                const cx = aiShip.x + Math.cos(aiShip.rotation) * launchDist;
+                const cy = aiShip.y + Math.sin(aiShip.rotation) * launchDist;
+                const statusTargets = alivePlayerShips.filter(s => distance(s.x, s.y, cx, cy) <= blastR &&
+                    ((s.markedTurns||0)>0||(s.superchargedTurns||0)>0||(s.blindedTurns||0)===0));
+                if (statusTargets.length > 0 && Math.random() < 0.55) {
+                    combat.playerNeutralize(aiShip, cx, cy);
+                    return;
+                }
+            }
+        }
+
+        // Gamma Ray AI: fire when enemies are in the forward cone
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('gamma_ray')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['gamma_ray'] || 0;
+            if (cd === 0) {
+                const halfAngle = CONSTANTS.GAMMA_RAY_HALF_ANGLE;
+                const range     = combat.getShootRange(aiShip);
+                const inCone    = alivePlayerShips.filter(s => {
+                    const dist = distance(aiShip.x, aiShip.y, s.x, s.y);
+                    if (dist > range) return false;
+                    const ang = Math.atan2(s.y - aiShip.y, s.x - aiShip.x);
+                    return Math.abs(normalizeAngle(ang - aiShip.rotation)) <= halfAngle;
+                });
+                if (inCone.length > 0 && Math.random() < 0.65) {
+                    combat.playerGammaRay(aiShip);
+                    return;
+                }
+            }
+        }
+
+        // Salvage AI: revive dead ally when available
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('salvage')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['salvage'] || 0;
+            if (cd === 0) {
+                const deadAlly = combat.enemyShips.find(s => !s.alive && !s.noCorpse);
+                if (deadAlly) {
+                    combat.playerSalvage(aiShip, deadAlly);
                     return;
                 }
             }
@@ -347,6 +462,103 @@ class AISystem {
             }
         }
 
+        // Phased ships: just skip if still phased (shouldn't act anyway, but guard)
+        if ((aiShip.phasedTurns || 0) > 0) return;
+
+        // Stasis: cannot act
+        if ((aiShip.stasisTurns || 0) > 0) return;
+
+        // Phase AI: phase when hull is below 35%
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('phase')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['phase'] || 0;
+            if (cd === 0 && aiShip.hull / aiShip.maxHull < 0.35 && (aiShip.phasedTurns || 0) === 0) {
+                combat.playerPhase(aiShip);
+                return;
+            }
+        }
+
+        // Teleport AI: teleport when cornered (hull < 50% and no targets in range)
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('teleport')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['teleport'] || 0;
+            const shootRange = combat.getShootRange(aiShip);
+            const inRange = alivePlayerShips.filter(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= shootRange);
+            if (cd === 0 && aiShip.hull / aiShip.maxHull < 0.5 && inRange.length === 0 && Math.random() < 0.5) {
+                combat.playerTeleport(aiShip);
+                return;
+            }
+        }
+
+        // Swap AI: swap with nearest player ship if they're in range
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('swap')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['swap'] || 0;
+            if (cd === 0) {
+                const swapTarget = alivePlayerShips.find(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.SWAP_RANGE);
+                if (swapTarget && Math.random() < 0.55) {
+                    combat.playerSwap(aiShip, swapTarget);
+                    return;
+                }
+            }
+        }
+
+        // Absorb AI: drain hull when surrounded
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('absorb')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['absorb'] || 0;
+            if (cd === 0) {
+                const nearby = alivePlayerShips.filter(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.ABSORB_RANGE);
+                if (nearby.length > 0 && Math.random() < 0.65) {
+                    combat.playerAbsorb(aiShip);
+                    return;
+                }
+            }
+        }
+
+        // Mirror AI: summon a mirror copy at start of combat (when first action)
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('summon_mirror')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['summon_mirror'] || 0;
+            const hasMirror = combat.enemyShips.some(s => s.isMirror && s.alive && s.mirrorOrigin === aiShip);
+            if (cd === 0 && !hasMirror && Math.random() < 0.7) {
+                combat.playerSummonMirror(aiShip);
+                return;
+            }
+        }
+
+        // Stasis field AI: deploy near player cluster
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('stasis_field')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['stasis_field'] || 0;
+            if (cd === 0) {
+                const nearby = alivePlayerShips.filter(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.STASIS_CAST_RANGE + CONSTANTS.STASIS_RADIUS);
+                if (nearby.length >= 2 && Math.random() < 0.6) {
+                    const cx = nearby.reduce((sum, s) => sum + s.x, 0) / nearby.length;
+                    const cy = nearby.reduce((sum, s) => sum + s.y, 0) / nearby.length;
+                    combat.playerStasisField(aiShip, cx, cy);
+                    return;
+                }
+            }
+        }
+
+        // Doom AI: doom self when hull < 20% and enemy ships are nearby
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('doom')) {
+            const cd = (aiShip.specialMoveCooldowns || {})['doom'] || 0;
+            if (cd === 0 && aiShip.hull / aiShip.maxHull < 0.2 && !(aiShip.doomTurns > 0)) {
+                const nearby = alivePlayerShips.filter(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= CONSTANTS.DOOM_BLAST_RADIUS * 1.5);
+                if (nearby.length > 0) {
+                    combat.playerDoom(aiShip);
+                    return;
+                }
+            }
+        }
+
+        // Ravager AI: use ravager (shorter range) when in range
+        if (aiShip.specialMoves && aiShip.specialMoves.includes('ravager') || aiShip.hasRavager) {
+            const ravRange = combat.getShootRange(aiShip) * CONSTANTS.RAVAGER_RANGE_MULT;
+            const inRavRange = alivePlayerShips.filter(s => distance(aiShip.x, aiShip.y, s.x, s.y) <= ravRange && isInFiringZone(aiShip, s));
+            if (inRavRange.length > 0 && Math.random() < 0.6) {
+                const target = inRavRange.reduce((a, b) => (a.hull < b.hull) ? a : b);
+                combat.playerRavager(aiShip, target);
+                return;
+            }
+        }
+
         // Blink AI: blink toward nearest target if they're within blink range but outside shoot range
         if (aiShip.specialMoves && aiShip.specialMoves.includes('blink')) {
             const cd = (aiShip.specialMoveCooldowns || {})['blink'] || 0;
@@ -485,11 +697,11 @@ class AISystem {
             console.log(`[AI ${aiShip.name}] SKIP RAM: hull too low (${aiShip.hull}/${aiShip.maxHull})`);
         }
 
-        // Filter to targets within the port/starboard firing zone
+        // Filter to targets within the firing zone (forward cone for humans, side triangles for aliens)
         const validTargets = inRange.filter(s => isInFiringZone(aiShip, s));
 
         if (validTargets.length === 0) {
-            // In range but not broadsiding — move in whichever direction achieves the broadside angle.
+            // Not in firing arc — maneuver to acquire target
             let nearest = inRange[0], nearestDist = distance(aiShip.x, aiShip.y, inRange[0].x, inRange[0].y);
             inRange.forEach(s => {
                 const d = distance(aiShip.x, aiShip.y, s.x, s.y);
@@ -497,12 +709,20 @@ class AISystem {
             });
 
             const ang = Math.atan2(nearest.y - aiShip.y, nearest.x - aiShip.x);
-            const rotPort = normalizeAngle(ang + Math.PI / 2);
-            const rotStbd = normalizeAngle(ang - Math.PI / 2);
-            const portDelta = Math.abs(normalizeAngle(rotPort - aiShip.rotation));
-            const stbdDelta = Math.abs(normalizeAngle(rotStbd - aiShip.rotation));
-            const side      = portDelta < stbdDelta ? 'port' : 'stbd';
-            const moveAngle = portDelta < stbdDelta ? rotPort : rotStbd;
+            let moveAngle;
+            if (aiShip.shipType && aiShip.shipType.startsWith('Alien')) {
+                // Alien: strafe to get enemy into a broadside (port/starboard) arc
+                const rotPort = normalizeAngle(ang + Math.PI / 2);
+                const rotStbd = normalizeAngle(ang - Math.PI / 2);
+                const portDelta = Math.abs(normalizeAngle(rotPort - aiShip.rotation));
+                const stbdDelta = Math.abs(normalizeAngle(rotStbd - aiShip.rotation));
+                moveAngle = portDelta < stbdDelta ? rotPort : rotStbd;
+                console.log(`[AI ${aiShip.name}] STRAFE to ${portDelta < stbdDelta ? 'port' : 'stbd'} broadside toward ${nearest.name}`);
+            } else {
+                // Human: rotate to face the enemy (forward-firing)
+                moveAngle = ang;
+                console.log(`[AI ${aiShip.name}] FACE toward ${nearest.name}`);
+            }
 
             const farX = aiShip.x + Math.cos(moveAngle) * aiShip.engine * 20;
             const farY = aiShip.y + Math.sin(moveAngle) * aiShip.engine * 20;
@@ -513,10 +733,9 @@ class AISystem {
             if (moveDist > 0.5) {
                 aiShip.targetX        = dest.x;
                 aiShip.targetY        = dest.y;
-                aiShip.targetRotation = Math.atan2(dest.y - aiShip.y, dest.x - aiShip.x);
+                aiShip.targetRotation = moveAngle;
                 aiShip.isMoving       = true;
             }
-            console.log(`[AI ${aiShip.name}] STRAFE to ${side} broadside toward ${nearest.name} moveDist=${moveDist.toFixed(0)}`);
             return;
         }
 

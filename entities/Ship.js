@@ -78,8 +78,18 @@ class Ship {
         this.cloaked = false;
         this.cloakTurnsRemaining = 0;
     }
+
+    dephase() {
+        if ((this.phasedTurns || 0) > 0) {
+            this.phasedTurns = 0;
+            return true;
+        }
+        return false;
+    }
     
     takeDamage(damage, isLaser = false) {
+        if ((this.phasedTurns || 0) > 0) return { shieldAbsorb: 0, hullDmg: 0 };
+        if ((this.stasisTurns || 0) > 0) return { shieldAbsorb: 0, hullDmg: 0 };
         if (!isLaser && this.statusEffect === 'ice' && damage > 0) damage = Math.ceil(damage * CONSTANTS.FROZEN_DAMAGE_MULT);
         if (damage > 0) this.decloak();
         const absorbedByShields = Math.min(damage, this.shields);
@@ -144,6 +154,15 @@ class Ship {
             this.projectileReflectChance = (this.projectileReflectChance || 0) + 0.20;
         } else if (e.type === 'repulsor') {
             this.hasRepulsor = true;
+        } else if (e.type === 'ravager') {
+            this.hasRavager = true;
+        } else if (e.type === 'scatter') {
+            this.hasScatter = true;
+        } else if (e.type === 'attractor') {
+            this.hasAttractor = true;
+        } else if (e.type === 'ion_laser') {
+            this.laserDamage += amt;
+            this.hasIonLaser = true;
         }
     }
 
@@ -161,6 +180,7 @@ class Ship {
     }
     
     getMaxMoveDistance() {
+        if ((this.webTurns || 0) > 0) return Math.max(5, Math.round(this.engine * CONSTANTS.WEB_SPEED_MULT));
         return this.engine;
     }
     
