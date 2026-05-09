@@ -191,6 +191,15 @@ class RenderingSystem {
     }
 
     // Returns the hex color for a ship's current most-prominent status effect, or null
+    _lerpColor(colA, colB, t) {
+        const r1 = parseInt(colA.slice(1, 3), 16), g1 = parseInt(colA.slice(3, 5), 16), b1 = parseInt(colA.slice(5, 7), 16);
+        const r2 = parseInt(colB.slice(1, 3), 16), g2 = parseInt(colB.slice(3, 5), 16), b2 = parseInt(colB.slice(5, 7), 16);
+        const r  = Math.round(r1 + (r2 - r1) * t).toString(16).padStart(2, '0');
+        const g  = Math.round(g1 + (g2 - g1) * t).toString(16).padStart(2, '0');
+        const b  = Math.round(b1 + (b2 - b1) * t).toString(16).padStart(2, '0');
+        return `#${r}${g}${b}`;
+    }
+
     _statusEffectColor(ship) {
         if ((ship.markedTurns || 0) > 0)       return '#ff8800';
         if ((ship.berserkTurns || 0) > 0)      return '#ff44ff';
@@ -257,8 +266,9 @@ class RenderingSystem {
             if (!isWreck && (ship.shields > 0 || shieldFlash)) {
                 const glowColor = shieldFlash ? '#ff2222' : '#00c8ff';
                 const outerAlpha = this.ctx.globalAlpha;
+                const shieldFrac = shieldFlash ? 1.0 : (ship.maxShields > 0 ? ship.shields / ship.maxShields : 0);
                 this.ctx.save();
-                this.ctx.globalAlpha = outerAlpha * 0.85;
+                this.ctx.globalAlpha = outerAlpha * 0.85 * Math.max(0.15, shieldFrac);
                 this.ctx.shadowColor = glowColor;
                 this.ctx.shadowBlur = 10;
                 this.ctx.shadowOffsetX = 0;
@@ -283,17 +293,16 @@ class RenderingSystem {
                 tint = ship.factionColor || '#ff4444'; tintAlpha = 0.45;
             }
 
-            // Sprites face up; +π/2 rotates them to face the game's +X forward direction.
-            spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint, tintAlpha });
-
-            // Status effect body pulse — overlay a second tinted draw
+            // Lerp tint toward status effect color in a single draw — avoids white-flash
+            // from re-rendering the sprite's natural colors as a second overlay pass.
             const statusColor = !hullFlash && !isWreck ? this._statusEffectColor(ship) : null;
             if (statusColor) {
-                const pulseTintAlpha = (Math.sin((Date.now() % 2000) / 2000 * Math.PI * 2) * 0.5 + 0.5) * 0.6;
-                if (pulseTintAlpha > 0.01) {
-                    spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint: statusColor, tintAlpha: pulseTintAlpha });
-                }
+                const pulseFrac = (Math.sin((Date.now() % 2000) / 2000 * Math.PI * 2) * 0.5 + 0.5);
+                tint = this._lerpColor(tint, statusColor, pulseFrac * 0.8);
             }
+
+            // Sprites face up; +π/2 rotates them to face the game's +X forward direction.
+            spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint, tintAlpha });
         } else {
             // Vector fallback
             let fillColor;
@@ -306,23 +315,15 @@ class RenderingSystem {
             } else {
                 fillColor = ship.isDrone ? (ship.isPlayer ? '#ffaa33' : '#ff7700') : (ship.isPlayer ? '#aaaaaa' : (ship.factionColor || '#ff3333'));
             }
+            // Lerp fill color toward status effect color for a smooth single-pass pulse
+            const statusColorVec = !hullFlash && !isWreck ? this._statusEffectColor(ship) : null;
+            if (statusColorVec) {
+                const pulseFrac = (Math.sin((Date.now() % 2000) / 2000 * Math.PI * 2) * 0.5 + 0.5);
+                fillColor = this._lerpColor(fillColor, statusColorVec, pulseFrac * 0.8);
+            }
             this.ctx.fillStyle = fillColor;
             drawShipShape(this.ctx, verts, SIZE);
             this.ctx.fill();
-
-            // Status effect body pulse — overlay a translucent fill in the effect color
-            const statusColorVec = !hullFlash && !isWreck ? this._statusEffectColor(ship) : null;
-            if (statusColorVec) {
-                const pulseAlpha = (Math.sin((Date.now() % 2000) / 2000 * Math.PI * 2) * 0.5 + 0.5) * 0.55;
-                if (pulseAlpha > 0.01) {
-                    const savedAlpha = this.ctx.globalAlpha;
-                    this.ctx.globalAlpha = savedAlpha * pulseAlpha;
-                    this.ctx.fillStyle = statusColorVec;
-                    drawShipShape(this.ctx, verts, SIZE);
-                    this.ctx.fill();
-                    this.ctx.globalAlpha = savedAlpha;
-                }
-            }
 
             // Polygon shield outline (vector ships only)
             if (!isWreck && (ship.shields > 0 || shieldFlash)) {

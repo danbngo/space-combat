@@ -66,7 +66,12 @@ Combat.prototype.processDroneTurn = function(drone) {
 Combat.prototype.endPlayerTurn = function() {
         this.state = COMBAT_STATE.ENEMY_TURN;
         UISystem.updateCombatScreen(gameState, this);
-        this.beginEnemyTurn();
+        // Wait for any in-flight player animations before handing off to the enemy
+        const waitAndBegin = () => {
+            if (this.isAnimating()) { setTimeout(waitAndBegin, 50); return; }
+            this.beginEnemyTurn();
+        };
+        waitAndBegin();
 };
 
 Combat.prototype.beginEnemyTurn = function() {

@@ -348,10 +348,11 @@ class Combat {
                 if (dist < minDist) {
                     const overlap = minDist - dist;
                     const ang = dist > 0.1 ? Math.atan2(alive.y - dead.y, alive.x - dead.x) : randomFloat(0, Math.PI * 2);
-                    addKnockback(alive, Math.cos(ang) * (overlap + 8), Math.sin(ang) * (overlap + 8));
-                    // Nudge dead ship in opposite direction
-                    dead.x -= Math.cos(ang) * (overlap * 0.3);
-                    dead.y -= Math.sin(ang) * (overlap * 0.3);
+                    const push = (overlap + 15) * 0.5;
+                    addKnockback(alive, Math.cos(ang) * push, Math.sin(ang) * push);
+                    // Nudge dead ship in opposite direction by the same amount
+                    dead.x -= Math.cos(ang) * push;
+                    dead.y -= Math.sin(ang) * push;
                     const pairKey = `alv${alive.name}-dsh${dead.name}`;
                     if (!this._overlapDamagedPairs.has(pairKey)) {
                         this._overlapDamagedPairs.add(pairKey);

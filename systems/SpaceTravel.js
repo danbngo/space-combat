@@ -145,10 +145,14 @@ class SpaceTravel {
 
         const isQueenRoute = destinationTier === QUEEN_TIER;
 
-        return { destinationTier, fleetStrength: strength, maxEncounters, factionWeights, hazardChance, isQueenRoute };
+        const rd = { destinationTier, fleetStrength: strength, maxEncounters, factionWeights, hazardChance, isQueenRoute };
+        // Pre-roll fleets so they're visible on the galaxy map before travel
+        rd.fleets = this.rollEncountersForRoute(rd);
+        return rd;
     }
 
-    // Roll encounters for a route at travel time — returns array sorted by _crossT
+    // Generate fleet entries for a route — returns array sorted by _crossT.
+    // Each entry includes faction, size, fleetStrength, _crossT, leaderType, done flag.
     static rollEncountersForRoute(routeData) {
         if (routeData.isQueenRoute) {
             return [{
@@ -158,53 +162,36 @@ class SpaceTravel {
                 size: 5,
                 fleetStrength: CONSTANTS.FLEET_STRENGTH_MAX,
                 _crossT: 0.5,
+                leaderType: 'Alien Queen',
+                done: false,
             }];
         }
 
         const { fleetStrength, maxEncounters, factionWeights } = routeData;
-        const encounterChance = CONSTANTS.ENCOUNTER_CHANCE_BASE
-            + (fleetStrength / CONSTANTS.FLEET_STRENGTH_MAX) * (CONSTANTS.ENCOUNTER_CHANCE_MAX - CONSTANTS.ENCOUNTER_CHANCE_BASE);
+
+        const pickFaction = (weights) => {
+            const total = Object.values(weights).reduce((a, b) => a + b, 0);
+            let r = Math.random() * total;
+            for (const [f, w] of Object.entries(weights)) { r -= w; if (r <= 0) return f; }
+            return 'pirates';
+        };
+        const pickLeader = (faction, strength) => {
+            const tier = strength <= 3 ? 'low' : strength <= 6 ? 'mid' : 'high';
+            const pools = CONSTANTS.FACTION_SHIP_POOLS[faction];
+            const pool = (pools && pools[tier]) || (CONSTANTS.FACTIONS.find(f => f.id === faction) || {}).shipTypes || ['Corvette'];
+            return pool[Math.floor(Math.random() * pool.length)];
+        };
 
         const encounters = [];
         const span = 0.70;
         const step = span / maxEncounters;
 
         for (let i = 0; i < maxEncounters; i++) {
-            if (Math.random() > encounterChance) continue;
-
             const baseT = 0.15 + step * i + step * 0.1 + Math.random() * step * 0.8;
             const crossT = Math.min(0.85, Math.max(0.15, baseT));
-
-            // Weighted faction roll
-            const totalWeight = Object.values(factionWeights).reduce((a, b) => a + b, 0);
-            let r = Math.random() * totalWeight;
-            let faction = 'pirates';
-            for (const [f, w] of Object.entries(factionWeights)) {
-                r -= w;
-                if (r <= 0) { faction = f; break; }
-            }
-
-            // Fleet size from strength
-            const size = fleetStrength <= 3 ? randomInt(1, 2)
-                       : fleetStrength <= 6 ? randomInt(2, 4)
-                       : randomInt(3, 6);
-
-            encounters.push({ faction, size, fleetStrength, _crossT: crossT });
-        }
-
-        // Guarantee at least one encounter
-        if (encounters.length === 0) {
-            const totalWeight = Object.values(factionWeights).reduce((a, b) => a + b, 0);
-            let r = Math.random() * totalWeight;
-            let faction = 'pirates';
-            for (const [f, w] of Object.entries(factionWeights)) {
-                r -= w;
-                if (r <= 0) { faction = f; break; }
-            }
-            const size = fleetStrength <= 3 ? randomInt(1, 2)
-                       : fleetStrength <= 6 ? randomInt(2, 4)
-                       : randomInt(3, 6);
-            encounters.push({ faction, size, fleetStrength, _crossT: 0.15 + Math.random() * 0.70 });
+            const faction = pickFaction(factionWeights);
+            const size = fleetStrength <= 3 ? randomInt(1, 2) : fleetStrength <= 6 ? randomInt(2, 4) : randomInt(3, 6);
+            encounters.push({ faction, size, fleetStrength, _crossT: crossT, leaderType: pickLeader(faction, fleetStrength), done: false });
         }
 
         return encounters.sort((a, b) => a._crossT - b._crossT);

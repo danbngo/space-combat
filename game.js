@@ -222,16 +222,16 @@ const GameController = {
         // Guard: only allow travel to direct children (no backtracking)
         if (!fromSystem.connections.includes(targetSystem.id)) return;
 
-        const routeKey   = getRouteKey(fromSystem.id, targetSystem.id);
-        const routeData  = gameState.routes ? gameState.routes.get(routeKey) : null;
-        const encounters = routeData ? SpaceTravel.rollEncountersForRoute(routeData) : [];
+        const routeKey  = getRouteKey(fromSystem.id, targetSystem.id);
+        const routeData = gameState.routes ? gameState.routes.get(routeKey) : null;
+        // Use the pre-rolled fleets; filter out any already cleared on a prior trip
+        const encounters = routeData && routeData.fleets ? routeData.fleets.filter(f => !f.done) : [];
 
         const alive     = gameState.playerShips.filter(s => s.alive);
         const avgEngine = alive.length > 0 ? alive.reduce((sum, s) => sum + s.engine, 0) / alive.length : 10;
 
         const arrive = () => {
             if (galaxyRenderer) galaxyRenderer._travelAnim = null;
-            _travelScreenState = null;
             const routeDist   = distance(fromSystem.x, fromSystem.y, targetSystem.x, targetSystem.y);
             const daysElapsed = routeDist / avgEngine / CONSTANTS.TRAVEL_TIME_SCALE;
             gameState.day = (gameState.day || 1) + daysElapsed;
@@ -249,11 +249,7 @@ const GameController = {
             UISystem.updateGalaxyScreen(gameState);
         };
 
-        // Switch to travel screen
-        gameState.state = GAME_STATE.TRAVEL;
-        _travelScreenState = { from: fromSystem, to: targetSystem, routeData, encounters };
-        UISystem.showTravelScreen(gameState, fromSystem, targetSystem, routeData, encounters);
-
+        // Stay on galaxy map during travel — the animated ship icon drives the visual
         if (galaxyRenderer) galaxyRenderer.startTravelAnim(fromSystem, targetSystem, avgEngine);
         this.processEncounters(fromSystem, targetSystem, routeKey, encounters, 0, arrive);
     },
@@ -266,7 +262,10 @@ const GameController = {
         }
 
         const encounter = encounters[index];
-        const continueNext = () => this.processEncounters(fromSystem, targetSystem, routeKey, encounters, index + 1, onArrival);
+        const continueNext = () => {
+            encounter.done = true;
+            this.processEncounters(fromSystem, targetSystem, routeKey, encounters, index + 1, onArrival);
+        };
 
         if (galaxyRenderer) {
             galaxyRenderer.animateTravelSegment(encounter._crossT ?? encounter.position, () => {
@@ -919,8 +918,9 @@ const GameController = {
         const titleEl = document.getElementById('combatResultTitle');
         const bodyEl  = document.getElementById('combatResultBody');
 
-        const allPlayerShips = [...combat.playerShips, ...combat.fleedPlayerShips];
-        const allEnemyShips  = [...combat.enemyShips,  ...combat.fleedEnemyShips];
+        const isTemp = s => s.isBomb || s.isTorpedo || s.isSwarmlet || s.isDrone || s.isMirror;
+        const allPlayerShips = [...combat.playerShips, ...combat.fleedPlayerShips].filter(s => !isTemp(s));
+        const allEnemyShips  = [...combat.enemyShips,  ...combat.fleedEnemyShips].filter(s => !isTemp(s));
 
         const playerDestroyed = allPlayerShips.filter(s => !s.alive).length;
         const playerFled      = allPlayerShips.filter(s => s.fled && s.alive).length;
@@ -1010,35 +1010,30 @@ const GameController = {
             } else {
                 gameState.credits += rewards;
             }
-            const hasCont = !!_travelContinuation;
-            if (hasCont && _travelScreenState) {
-                gameState.state = GAME_STATE.TRAVEL;
-                UISystem.showTravelScreen(gameState, _travelScreenState.from, _travelScreenState.to, _travelScreenState.routeData, _travelScreenState.encounters);
+            // Return to galaxy map; if mid-travel, resume the journey
+            gameState.state = GAME_STATE.GALAXY;
+            UISystem.showScreen('galaxyScreen');
+            UISystem.updateGalaxyScreen(gameState);
+            if (_travelContinuation) {
                 const cont = _travelContinuation;
                 _travelContinuation = null;
                 cont();
-            } else {
-                gameState.state = GAME_STATE.GALAXY;
-                UISystem.showScreen('galaxyScreen');
-                UISystem.updateGalaxyScreen(gameState);
             }
         } else if (combat.lost) {
             _travelContinuation = null;
-            _travelScreenState = null;
             if (galaxyRenderer) galaxyRenderer._travelAnim = null;
             UISystem.showGameOver(false, 'All your ships were destroyed. Game Over!');
             gameState.state = GAME_STATE.GAME_OVER;
         } else if (combat.playerRetreated) {
-            // Retreated mid-travel → continue to destination
-            const hasCont = !!_travelContinuation;
-            if (hasCont && _travelScreenState) {
-                gameState.state = GAME_STATE.TRAVEL;
-                UISystem.showTravelScreen(gameState, _travelScreenState.from, _travelScreenState.to, _travelScreenState.routeData, _travelScreenState.encounters);
+            // Retreated mid-travel → resume journey; otherwise just return to galaxy map
+            if (_travelContinuation) {
+                gameState.state = GAME_STATE.GALAXY;
+                UISystem.showScreen('galaxyScreen');
+                UISystem.updateGalaxyScreen(gameState);
                 const cont = _travelContinuation;
                 _travelContinuation = null;
                 cont();
             } else {
-                _travelScreenState = null;
                 if (galaxyRenderer) galaxyRenderer._travelAnim = null;
                 gameState.state = GAME_STATE.GALAXY;
                 UISystem.showScreen('galaxyScreen');

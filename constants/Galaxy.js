@@ -12,8 +12,6 @@ const CONSTANTS_GALAXY = {
     TREE_BRANCHES_MAX:    3,    // max forward connections per node
 
     // Encounter scaling
-    ENCOUNTER_CHANCE_BASE:  0.35,   // probability of an encounter slot firing at strength 1
-    ENCOUNTER_CHANCE_MAX:   0.85,   // probability at strength 10
     ROUTE_MAX_ENCOUNTERS:   5,
 
     // Fleet strength: base = 1 + floor(destinationTier/QUEEN_TIER * 8), then ±JITTER

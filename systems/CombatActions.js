@@ -448,6 +448,7 @@ Combat.prototype.playerPlantBomb = function(ship, tx, ty) {
         this.addAnimation({ type: 'blinkRing', x: tx, y: ty, duration: 400, totalDuration: 400 });
         this.addFloatingText('Bomb planted!', '#ff8844', ship.x, ship.y - 16);
         this.addLog(`${this._shipLabel(ship)}: Bomb planted — detonates in ${CONSTANTS.BOMB_LIFETIME} turns!`);
+        this._pendingOverlapCheck = true;
 
         this.checkAutoAdvance(ship);
         UISystem.updateCombatScreen(gameState, this);
@@ -607,13 +608,14 @@ Combat.prototype.playerSummonDrone = function(carrier) {
         this.addAnimation({ type: 'blinkRing', x: sx, y: sy, duration: 400, totalDuration: 400 });
         this.addFloatingText('Drone deployed!', '#88ffcc', carrier.x, carrier.y - 16);
         this.addLog(`${this._shipLabel(carrier)}: Combat drone deployed`);
+        this._pendingOverlapCheck = true;
 
         this.checkAutoAdvance(carrier);
         UISystem.updateCombatScreen(gameState, this);
 };
 
 Combat.prototype.getRepairBeamRange = function(ship) {
-        return ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 1.5;
+        return ship.radar * CONSTANTS.SHOOT_RANGE_BASE * 0.75;
 };
 
 Combat.prototype.getRepairBeamConeTargets = function(ship) {
@@ -655,8 +657,9 @@ Combat.prototype.playerRepairBeam = function(ship) {
                     this.addFloatingText('Revived!', '#00ff88', target.x, target.y - 6);
                     this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: REVIVED!`);
                 } else {
-                    const hullRestored = Math.min(CONSTANTS.REPAIR_BEAM_HULL, target.maxHull - target.hull);
-                    target.hull = Math.min(target.maxHull, target.hull + CONSTANTS.REPAIR_BEAM_HULL);
+                    const heal = randomInt(CONSTANTS.REPAIR_BEAM_HULL_MIN, CONSTANTS.REPAIR_BEAM_HULL_MAX);
+                    const hullRestored = Math.min(heal, target.maxHull - target.hull);
+                    target.hull = Math.min(target.maxHull, target.hull + heal);
                     if (hullRestored > 0) this.addFloatingText(`+${hullRestored} hull`, '#00ff88', target.x, target.y - 6);
                     this.addLog(`${this._shipLabel(ship)} repair → ${this._shipLabel(target)}: ${hullRestored > 0 ? `+${hullRestored} hull` : 'full'}`);
                 }
@@ -731,6 +734,7 @@ Combat.prototype.playerSwarm = function(ship) {
         this.playerMode = null;
         this.addFloatingText(`Swarm x${count}!`, '#ff8800', ship.x, ship.y - 12);
         this.addLog(`${this._shipLabel(ship)}: released ${count} swarmlets!`);
+        this._pendingOverlapCheck = true;
         this.checkAutoAdvance(ship);
         UISystem.updateCombatScreen(gameState, this);
 };
@@ -971,6 +975,7 @@ Combat.prototype.playerTorpedo = function(ship) {
         ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
         ship.specialMoveCooldowns['torpedo'] = CONSTANTS.SPECIAL_MOVES.torpedo.cooldown;
         this.playerMode = null;
+        this._pendingOverlapCheck = true;
         this.checkAutoAdvance(ship);
         UISystem.updateCombatScreen(gameState, this);
 };
@@ -1422,12 +1427,13 @@ Combat.prototype.playerFlash = function(ship, tx, ty) {
         const self = this;
         setTimeout(() => {
             hit.forEach(t => {
-                t.hull = Math.max(0, t.hull - CONSTANTS.FLASH_DAMAGE);
+                const flashDmg = randomInt(CONSTANTS.FLASH_DAMAGE_MIN, CONSTANTS.FLASH_DAMAGE_MAX);
+                t.hull = Math.max(0, t.hull - flashDmg);
                 if (t.hull <= 0) t.alive = false;
                 t.blindedTurns = CONSTANTS.FLASH_BLIND_TURNS;
-                t.triggerHitFlash(CONSTANTS.FLASH_DAMAGE, 0);
+                t.triggerHitFlash(flashDmg, 0);
                 self.addFloatingText('Blinded!', '#ffffaa', t.x, t.y - 18);
-                self.addFloatingText(`-${CONSTANTS.FLASH_DAMAGE}`, '#ffff44', t.x, t.y - 6);
+                self.addFloatingText(`-${flashDmg}`, '#ffff44', t.x, t.y - 6);
                 if (!t.alive) {
                     self.addAnimation({ type: 'explosion', x: t.x, y: t.y, duration: CONSTANTS.EXPLOSION_DURATION, totalDuration: CONSTANTS.EXPLOSION_DURATION });
                     self.addLog(`${self._shipLabel(t)}: destroyed!`);

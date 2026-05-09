@@ -13,6 +13,7 @@ class GalaxyRenderer {
         this.selectedSystem = null;
         this.hoveredRoute = null;
         this.selectedRoute = null;
+        this.hoveredFleet = null;
         this.isDragging = false;
         this.dragged = false;
         this.lastDragX = 0;
@@ -34,6 +35,7 @@ class GalaxyRenderer {
         this.maxZoom = CONSTANTS.GALAXY_MAX_ZOOM;
         
         this._loopRunning = false;
+        this._snapBackTimer = null;
 
         this._stars = Array.from({ length: 200 }, () => ({
             x: Math.random(), y: Math.random(),
@@ -67,18 +69,7 @@ class GalaxyRenderer {
     }
     
     updateZoom() {
-        const zoomedScaleX = this.scaleX * this.zoom;
-        const zoomedScaleY = this.scaleY * this.zoom;
-        const scaledWidth = CONSTANTS.GALAXY_WIDTH * zoomedScaleX;
-        const scaledHeight = CONSTANTS.GALAXY_HEIGHT * zoomedScaleY;
-        
-        if (scaledWidth <= this.canvas.width) {
-            this.translateX = (this.canvas.width - scaledWidth) / 2;
-        }
-        
-        if (scaledHeight <= this.canvas.height) {
-            this.translateY = (this.canvas.height - scaledHeight) / 2;
-        }
+        // No forced centering — panning is unrestricted; snap-back handles off-screen ship.
     }
     
     setZoom(newZoom, focusX, focusY, source = 'button') {
@@ -195,15 +186,18 @@ class GalaxyRenderer {
 
         const oldHovered = this.hoveredSystem;
         const oldRoute   = this.hoveredRoute;
+        const oldFleet   = this.hoveredFleet;
         this.hoveredSystem = this.getSystemAtPosition(galaxyX, galaxyY);
-        this.hoveredRoute  = this.hoveredSystem ? null : this.getRouteAtPosition(galaxyX, galaxyY);
+        this.hoveredFleet  = this.hoveredSystem ? null : this.getFleetAtPosition(galaxyX, galaxyY);
+        this.hoveredRoute  = (this.hoveredSystem || this.hoveredFleet) ? null : this.getRouteAtPosition(galaxyX, galaxyY);
 
         const sysChanged   = this.hoveredSystem?.id !== oldHovered?.id;
+        const fleetChanged = this.hoveredFleet?.fleet !== oldFleet?.fleet;
         const routeChanged = this.hoveredRoute?.routeKey !== oldRoute?.routeKey;
 
-        if (sysChanged || routeChanged) {
-            const nowHovering = this.hoveredSystem || this.hoveredRoute;
-            const wasHovering = oldHovered || oldRoute;
+        if (sysChanged || fleetChanged || routeChanged) {
+            const nowHovering = this.hoveredSystem || this.hoveredFleet || this.hoveredRoute;
+            const wasHovering = oldHovered || oldFleet || oldRoute;
             if (nowHovering && !wasHovering) this.scheduleTooltipShow();
             else if (!nowHovering && wasHovering) this.scheduleTooltipHide();
             else if (nowHovering && wasHovering) { this.scheduleTooltipHide(); this.scheduleTooltipShow(); }
@@ -395,7 +389,9 @@ class GalaxyRenderer {
     onMouseLeave() {
         this.hoveredSystem = null;
         this.hoveredRoute = null;
+        this.hoveredFleet = null;
         this.scheduleTooltipHide();
+        if (this.isDragging) this._scheduleSnapBack();
         this.isDragging = false;
         this.dragged = false;
         if (typeof gameState !== 'undefined') {
@@ -405,7 +401,7 @@ class GalaxyRenderer {
 
     onMouseDown(e) {
         if (e.button !== 0) return;
-
+        if (this._snapBackTimer) { clearTimeout(this._snapBackTimer); this._snapBackTimer = null; }
         const rect = this.canvas.getBoundingClientRect();
         this.lastDragX = e.clientX - rect.left;
         this.lastDragY = e.clientY - rect.top;
@@ -415,6 +411,7 @@ class GalaxyRenderer {
 
     onMouseUp() {
         this.isDragging = false;
+        this._scheduleSnapBack();
     }
     
     onMouseWheel(e) {
@@ -574,7 +571,10 @@ class GalaxyRenderer {
 
             this.drawSystem(system, isReachable, isHovered, isSelected, isCurrent, isTransitOrigin);
         });
-        
+
+        // Draw enemy fleet icons on routes
+        this.drawFleetIcons(systems);
+
         // Draw player ship — traveling or stationary at current system
         if (this._travelAnim) {
             this.drawTravelingShip(this._travelAnim.from, this._travelAnim.to, this._travelAnim.progress);
@@ -586,6 +586,8 @@ class GalaxyRenderer {
         if (this.tooltipVisible) {
             if (this.hoveredSystem) {
                 this.updateTooltip(this.hoveredSystem, currentSystem);
+            } else if (this.hoveredFleet) {
+                this.drawFleetTooltip(this.hoveredFleet);
             } else if (this.hoveredRoute) {
                 this.updateRouteTooltip(this.hoveredRoute, currentSystem);
             } else {
@@ -850,10 +852,12 @@ class GalaxyRenderer {
         }
         
         this.tooltipShowTimer = setTimeout(() => {
-            if (this.hoveredSystem || this.hoveredRoute) {
+            if (this.hoveredSystem || this.hoveredFleet || this.hoveredRoute) {
                 this.tooltipVisible = true;
                 if (this.hoveredSystem) {
                     this.updateTooltip(this.hoveredSystem, gameState.currentSystem);
+                } else if (this.hoveredFleet) {
+                    this.drawFleetTooltip(this.hoveredFleet);
                 } else {
                     this.updateRouteTooltip(this.hoveredRoute, gameState.currentSystem);
                 }
@@ -876,6 +880,167 @@ class GalaxyRenderer {
         }, CONSTANTS.GALAXY_TOOLTIP_DELAY);
     }
     
+    _scheduleSnapBack() {
+        if (this._snapBackTimer) clearTimeout(this._snapBackTimer);
+        this._snapBackTimer = setTimeout(() => {
+            this._snapBackTimer = null;
+            this._checkAndSnapBack();
+        }, 2500);
+    }
+
+    _checkAndSnapBack() {
+        if (typeof gameState === 'undefined' || !gameState.currentSystem) return;
+        let gx, gy;
+        if (this._travelAnim) {
+            const a = this._travelAnim;
+            gx = a.from.x + (a.to.x - a.from.x) * a.progress;
+            gy = a.from.y + (a.to.y - a.from.y) * a.progress;
+        } else {
+            gx = gameState.currentSystem.x;
+            gy = gameState.currentSystem.y;
+        }
+        const zx = this.scaleX * this.zoom;
+        const zy = this.scaleY * this.zoom;
+        const sx = this.translateX + gx * zx;
+        const sy = this.translateY + gy * zy;
+        const pad = 60;
+        const inView = sx >= pad && sx <= this.canvas.width  - pad
+                    && sy >= pad && sy <= this.canvas.height - pad;
+        if (!inView) this._animateSnapTo(gx, gy);
+    }
+
+    _animateSnapTo(gx, gy) {
+        const zx = this.scaleX * this.zoom;
+        const zy = this.scaleY * this.zoom;
+        const toX = this.canvas.width  / 2 - gx * zx;
+        const toY = this.canvas.height / 2 - gy * zy;
+        const fromX = this.translateX;
+        const fromY = this.translateY;
+        const dur = 700;
+        const t0 = performance.now();
+        const tick = (now) => {
+            const p = Math.min(1, (now - t0) / dur);
+            const e = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
+            this.translateX = fromX + (toX - fromX) * e;
+            this.translateY = fromY + (toY - fromY) * e;
+            if (typeof gameState !== 'undefined' && gameState.systems && gameState.currentSystem) {
+                this.render(gameState.systems, gameState.currentSystem);
+            }
+            if (p < 1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }
+
+    drawFleetIcons(systems) {
+        if (!gameState || !gameState.routes) return;
+        const systemMap = new Map(systems.map(s => [s.id, s]));
+        const zx = this.scaleX * this.zoom;
+        const zy = this.scaleY * this.zoom;
+
+        for (const sys of systems) {
+            if (!sys.seen || !sys.connections) continue;
+            for (const connId of sys.connections) {
+                const other = systemMap.get(connId);
+                if (!other || !other.seen) continue;
+                const routeKey = getRouteKey(sys.id, connId);
+                const routeData = gameState.routes.get(routeKey);
+                if (!routeData || !routeData.fleets) continue;
+                const angle = Math.atan2(other.y - sys.y, other.x - sys.x);
+                for (const fleet of routeData.fleets) {
+                    if (fleet.done) continue;
+                    const gx = sys.x + (other.x - sys.x) * fleet._crossT;
+                    const gy = sys.y + (other.y - sys.y) * fleet._crossT;
+                    const cx = this.translateX + gx * zx;
+                    const cy = this.translateY + gy * zy;
+                    const isHov = this.hoveredFleet && this.hoveredFleet.fleet === fleet;
+                    this.drawFleetIcon(fleet, cx, cy, angle, isHov);
+                }
+            }
+        }
+    }
+
+    drawFleetIcon(fleet, cx, cy, angle, isHovered) {
+        const factionData = CONSTANTS.FACTIONS.find(f => f.id === fleet.faction);
+        const color = factionData ? factionData.color : '#ffffff';
+        const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === fleet.leaderType);
+        const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
+        const S = isHovered ? 9 : 7;
+
+        this.ctx.save();
+        this.ctx.translate(cx, cy);
+        this.ctx.rotate(angle);
+        if (isHovered) {
+            this.ctx.shadowBlur = 12;
+            this.ctx.shadowColor = color;
+        }
+        this.ctx.fillStyle = color;
+        drawShipShape(this.ctx, verts, S);
+        this.ctx.fill();
+        this.ctx.restore();
+
+        // Size badge — circle + ship count
+        const badgeX = cx + 7;
+        const badgeY = cy - 7;
+        this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.arc(badgeX, badgeY, 5.5, 0, Math.PI * 2);
+        this.ctx.fillStyle = color;
+        this.ctx.fill();
+        this.ctx.font = 'bold 8px Courier New';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillText(fleet.size, badgeX, badgeY);
+        this.ctx.restore();
+    }
+
+    getFleetAtPosition(galaxyX, galaxyY) {
+        if (!gameState || !gameState.routes || !window.galaxyMapSystems) return null;
+        const systems = window.galaxyMapSystems;
+        const systemMap = new Map(systems.map(s => [s.id, s]));
+        const hitRadius = 12 / (this.scaleX * this.zoom);
+
+        for (const sys of systems) {
+            if (!sys.seen || !sys.connections) continue;
+            for (const connId of sys.connections) {
+                const other = systemMap.get(connId);
+                if (!other || !other.seen) continue;
+                const routeKey = getRouteKey(sys.id, connId);
+                const routeData = gameState.routes.get(routeKey);
+                if (!routeData || !routeData.fleets) continue;
+                for (const fleet of routeData.fleets) {
+                    if (fleet.done) continue;
+                    const gx = sys.x + (other.x - sys.x) * fleet._crossT;
+                    const gy = sys.y + (other.y - sys.y) * fleet._crossT;
+                    if (distance(galaxyX, galaxyY, gx, gy) <= hitRadius) {
+                        return { fleet, fromSys: sys, toSys: other, routeKey };
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    drawFleetTooltip(hoveredFleetInfo) {
+        const tooltip = document.getElementById('systemTooltip');
+        if (!tooltip) return;
+        const { fleet } = hoveredFleetInfo;
+        const factionData = CONSTANTS.FACTIONS.find(f => f.id === fleet.faction);
+        const factionName = factionData ? factionData.name : fleet.faction;
+        const factionColor = factionData ? factionData.color : '#ffffff';
+        const threatLabel = fleet.fleetStrength <= 3 ? 'Low' : fleet.fleetStrength <= 6 ? 'Medium' : 'High';
+
+        let html = `<strong style="color:${factionColor}">${factionName} Fleet</strong><br>`;
+        html += `${fleet.size} ships · ${fleet.leaderType}<br>`;
+        html += `Threat: ${threatLabel} (${fleet.fleetStrength}/10)`;
+        if (fleet.isQueenFight) html += `<br><span style="color:#ff4400;">Alien Queen — Boss Fight</span>`;
+
+        tooltip.innerHTML = html;
+        tooltip.style.left = (this.mouseX + 10) + 'px';
+        tooltip.style.top = (this.mouseY + 10) + 'px';
+        tooltip.style.display = 'block';
+    }
+
     clearSelection() {
         this.selectedSystem = null;
     }
