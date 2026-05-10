@@ -136,17 +136,14 @@ const GameController = {
         });
         
         // Station Screen
-        document.getElementById('orbitTab').addEventListener('click', () => {
-            UISystem.setStationTab('orbit', gameState);
-        });
-        document.getElementById('dockTab').addEventListener('click', () => {
-            UISystem.setStationTab('dock', gameState);
-        });
         document.getElementById('shipyardTab').addEventListener('click', () => {
             UISystem.setStationTab('shipyard', gameState);
         });
         document.getElementById('modulesTab').addEventListener('click', () => {
             UISystem.setStationTab('modules', gameState);
+        });
+        document.getElementById('mechanicTab').addEventListener('click', () => {
+            UISystem.setStationTab('mechanic', gameState);
         });
         document.getElementById('courthouseTab').addEventListener('click', () => {
             UISystem.setStationTab('courthouse', gameState);
@@ -982,10 +979,11 @@ const GameController = {
     endCombat: function() {
         if (!combat) return;
 
+        // Keep all ships including dead ones (can be resurrected at shipyard)
         gameState.playerShips = [...combat.playerShips, ...combat.fleedPlayerShips];
         gameState.enemyShips = combat.enemyShips;
 
-        // Restore hull and shields to max between encounters
+        // Restore hull and shields to max for alive ships between encounters
         gameState.playerShips.forEach(s => {
             if (s.alive) { s.hull = s.maxHull; s.shields = s.maxShields; }
         });

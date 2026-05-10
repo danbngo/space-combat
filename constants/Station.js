@@ -1,6 +1,7 @@
 const CONSTANTS_STATION = {
-    REPAIR_COST:        50,
-    REPAIR_AMOUNT:      50,
     NEW_SHIP_BASE_COST: 800,
     STATION_OFFER_COUNT: 4,
+    RESURRECT_COST: 100,
+    SHIP_LEVEL_COSTS: [100, 250, 500, 1000], // cost to go from level 1→2, 2→3, 3→4, 4→5
+    SHIP_LEVEL_MULTS: [1.0, 1.25, 1.5, 1.75, 2.0],
 };

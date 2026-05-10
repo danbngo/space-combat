@@ -32,6 +32,14 @@ class Ship {
             this.engine = Math.max(5, Math.round((S.ENGINE_MIN + S.ENGINE_MAX) / 2 * typeData.engineMult));
         }
         
+        // Level system — stores base stats so upgrades scale correctly
+        this.level = 1;
+        this._baseMaxHull = this.maxHull;
+        this._baseMaxShields = this.maxShields;
+        this._baseLaserDamage = this.laserDamage;
+        this._baseRadar = this.radar;
+        this._baseEngine = this.engine;
+
         // Combat state
         this.actionsRemaining = 2;
         this.alive = true;
@@ -73,6 +81,21 @@ class Ship {
         this.isMoving = false;
         this.isShooting = false;
         this.shootingTarget = null;
+    }
+
+    upgradeLevel() {
+        if (this.level >= 5) return false;
+        this.level++;
+        const mults = CONSTANTS.SHIP_LEVEL_MULTS;
+        const mult = mults[this.level - 1];
+        this.maxHull = Math.max(1, Math.round(this._baseMaxHull * mult));
+        this.hull = Math.min(this.hull, this.maxHull);
+        this.maxShields = Math.max(0, Math.round(this._baseMaxShields * mult));
+        this.shields = Math.min(this.shields, this.maxShields);
+        this.laserDamage = Math.max(1, Math.round(this._baseLaserDamage * mult));
+        this.radar = Math.max(1, Math.round(this._baseRadar * mult));
+        this.engine = Math.max(5, Math.round(this._baseEngine * mult));
+        return true;
     }
 
     decloak() {

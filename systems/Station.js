@@ -1,24 +1,10 @@
 // Station System
 class StationSystem {
-    static repairShip(gameState, ship) {
-        if (gameState.credits < CONSTANTS.REPAIR_COST) {
-            alert('Not enough credits to repair ship.');
-            return false;
-        }
-
-        if (ship.hull >= ship.maxHull) {
-            alert('Ship hull is already at maximum.');
-            return false;
-        }
-
-        gameState.credits -= CONSTANTS.REPAIR_COST;
-        ship.rechargeHull(CONSTANTS.REPAIR_AMOUNT);
-        return true;
-    }
 
     static buyNewShip(gameState, shipStats, cost) {
-        if (gameState.playerShips.length >= CONSTANTS.PLAYER_STARTING_SHIPS) {
-            alert('Fleet is at maximum capacity.');
+        const aliveCount = gameState.playerShips.filter(s => s.alive).length;
+        if (aliveCount >= CONSTANTS.PLAYER_STARTING_SHIPS) {
+            alert('Fleet is at maximum capacity (alive ships).');
             return false;
         }
 
@@ -35,54 +21,44 @@ class StationSystem {
         return true;
     }
 
-    static sellShip(gameState, ship) {
-        if (gameState.playerShips.length <= 1) {
-            alert('You must keep at least one ship in your fleet.');
+    static junkShip(gameState, ship) {
+        const aliveCount = gameState.playerShips.filter(s => s.alive).length;
+        if (ship.alive && aliveCount <= 1) {
+            alert('Cannot junk your last active ship.');
             return false;
         }
-
-        const tradeValue = this.calculateShipSaleValue(ship);
-        const shipIndex = gameState.playerShips.indexOf(ship);
-
-        if (shipIndex === -1) {
-            alert('Ship not found.');
-            return false;
-        }
-
-        gameState.playerShips.splice(shipIndex, 1);
-        gameState.credits += tradeValue;
-        gameState.selectedShip = gameState.playerShips[0] || null;
+        const idx = gameState.playerShips.indexOf(ship);
+        if (idx === -1) return false;
+        gameState.playerShips.splice(idx, 1);
+        gameState.selectedShip = gameState.playerShips.find(s => s.alive) || gameState.playerShips[0] || null;
         return true;
     }
 
-    static tradeInShip(gameState, ship, newShipStats, newCost) {
-        const tradeValue = this.calculateShipSaleValue(ship);
-        const effectiveCost = Math.max(0, newCost - tradeValue);
-
-        if (gameState.credits < effectiveCost) {
-            alert('You do not have enough credits to complete the trade.');
+    static resurrectShip(gameState, ship) {
+        const cost = CONSTANTS.RESURRECT_COST;
+        if (gameState.credits < cost) {
+            alert('Not enough credits.');
             return false;
         }
-
-        const shipIndex = gameState.playerShips.indexOf(ship);
-        if (shipIndex === -1) {
-            alert('Ship not found.');
-            return false;
-        }
-
-        gameState.playerShips.splice(shipIndex, 1);
-        gameState.credits += tradeValue;
-        gameState.credits -= newCost;
-
-        const newShip = new Ship(0, 0, true, 0, newShipStats);
-        newShip._buyPrice = newCost;
-        gameState.playerShips.push(newShip);
-        gameState.selectedShip = newShip;
+        if (ship.alive) return false;
+        gameState.credits -= cost;
+        ship.alive = true;
+        ship.hull = Math.max(1, Math.round(ship.maxHull * 0.25));
+        ship.shields = 0;
         return true;
     }
 
-    static calculateShipSaleValue(ship) {
-        return ship._buyPrice || CONSTANTS.NEW_SHIP_BASE_COST;
+    static upgradeShipLevel(gameState, ship) {
+        if ((ship.level || 1) >= 5) return false;
+        const level = ship.level || 1;
+        const cost = CONSTANTS.SHIP_LEVEL_COSTS[level - 1];
+        if (gameState.credits < cost) {
+            alert('Not enough credits.');
+            return false;
+        }
+        gameState.credits -= cost;
+        ship.upgradeLevel();
+        return true;
     }
 
     static installModule(gameState, ship, moduleDef, quality = 1.0, adjustedCost = null) {
@@ -102,14 +78,7 @@ class StationSystem {
         return true;
     }
 
-    static rechargeShields(ships) {
-        ships.forEach(ship => {
-            ship.rechargeShields(ship.maxShields * 0.5);
-        });
-    }
-
     static visitStation(gameState) {
-        this.rechargeShields(gameState.playerShips);
         return true;
     }
 }

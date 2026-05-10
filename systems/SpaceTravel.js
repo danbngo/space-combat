@@ -52,7 +52,7 @@ class SpaceTravel {
 
                     // Each non-queen system is exactly one type of station
                     stationType: tier < QUEEN_TIER
-                        ? ['shipyard', 'mechanic', 'courthouse'][Math.floor(Math.random() * 3)]
+                        ? ['shipyard', 'blackmarket', 'mechanic', 'courthouse'][Math.floor(Math.random() * 4)]
                         : null,
                 };
 

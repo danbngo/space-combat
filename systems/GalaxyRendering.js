@@ -497,9 +497,10 @@ class GalaxyRenderer {
         const routeData = (typeof gameState !== 'undefined' && gameState.routes)
             ? gameState.routes.get(route.routeKey) : null;
         const tierLabel = route.to.isQueenPlanet ? 'Queen\'s Lair' : `Tier ${route.to.tier}`;
+        const isDirect = currentSystem && route.from.id === currentSystem.id;
 
         let html = `<strong>${route.from.name} → ${route.to.name}</strong>`;
-        if (routeData) {
+        if (routeData && isDirect) {
             const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
             const encLabel = routeData.maxEncounters === 1 ? '1 enc.' : `1–${routeData.maxEncounters} enc.`;
             html += `<br>${tierLabel} · ${strLabel} threat · ${encLabel}`;
@@ -744,7 +745,7 @@ class GalaxyRenderer {
         this.ctx.stroke();
     }
     
-    // Draw a station shape: 'circle' | 'diamond' | 'triangle'
+    // Draw a station shape: 'circle' | 'diamond' | 'triangle' | 'square'
     _drawStationShape(x, y, r, shape) {
         this.ctx.beginPath();
         if (shape === 'diamond') {
@@ -756,6 +757,9 @@ class GalaxyRenderer {
             this.ctx.moveTo(x,                    y - r);
             this.ctx.lineTo(x + r * 0.866,        y + r * 0.5);
             this.ctx.lineTo(x - r * 0.866,        y + r * 0.5);
+        } else if (shape === 'square') {
+            const h = r * 0.85;
+            this.ctx.rect(x - h, y - h, h * 2, h * 2);
         } else {
             this.ctx.arc(x, y, r, 0, Math.PI * 2);
         }
@@ -769,8 +773,10 @@ class GalaxyRenderer {
         const y = this.translateY + system.y * zoomedScaleY;
         const r = CONSTANTS.GALAXY_SYSTEM_RADIUS;
 
-        if (!system.seen) {
-            if (!this.visibleUnseenIds.has(system.id)) return;
+        // Show as '?' if: unseen, or (unvisited AND not directly reachable AND not current)
+        const showAsUnknown = !system.seen || (!system.visited && !isReachable && !isCurrent);
+        if (showAsUnknown) {
+            if (!system.seen && !this.visibleUnseenIds.has(system.id)) return;
             this.ctx.fillStyle = '#2a2a44';
             this.ctx.beginPath();
             this.ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -786,8 +792,8 @@ class GalaxyRenderer {
         }
 
         // Shape and base color by station type
-        const stationShape = { shipyard: 'circle', mechanic: 'diamond', courthouse: 'triangle' };
-        const stationBaseColor = { shipyard: '#4488ff', mechanic: '#ffaa00', courthouse: '#cc66ff' };
+        const stationShape = { shipyard: 'circle', blackmarket: 'square', mechanic: 'diamond', courthouse: 'triangle' };
+        const stationBaseColor = { shipyard: '#4488ff', blackmarket: '#ff5522', mechanic: '#ffaa00', courthouse: '#cc66ff' };
         const shape = system.isQueenPlanet ? 'circle' : (stationShape[system.stationType] || 'circle');
         const baseColor = system.isQueenPlanet ? '#ff4400' : (stationBaseColor[system.stationType] || '#808080');
 
@@ -840,14 +846,16 @@ class GalaxyRenderer {
         } else {
             const tierLabel = system.isQueenPlanet ? 'Alien Queen\'s Lair' : `Tier ${system.tier}`;
             const stationLabel = {
-                shipyard:   '⬡ Shipyard Station',
-                mechanic:   '◆ Mechanic Station',
-                courthouse: '▲ Courthouse Station',
+                shipyard:    '⬡ Shipyard',
+                blackmarket: '■ Black Market',
+                mechanic:    '◆ Mechanic',
+                courthouse:  '▲ Courthouse',
             }[system.stationType] || '';
             const stationColor = {
-                shipyard:   '#4488ff',
-                mechanic:   '#ffaa00',
-                courthouse: '#cc66ff',
+                shipyard:    '#4488ff',
+                blackmarket: '#ff5522',
+                mechanic:    '#ffaa00',
+                courthouse:  '#cc66ff',
             }[system.stationType] || '#aaa';
 
             let html = `<strong>${system.name}</strong><br>${tierLabel}`;
@@ -964,6 +972,8 @@ class GalaxyRenderer {
         const systemMap = new Map(systems.map(s => [s.id, s]));
         const zx = this.scaleX * this.zoom;
         const zy = this.scaleY * this.zoom;
+        const currentSys = gameState.currentSystem;
+        const directConnIds = new Set(currentSys ? currentSys.connections : []);
 
         for (const sys of systems) {
             if (!sys.seen || !sys.connections) continue;
@@ -973,7 +983,9 @@ class GalaxyRenderer {
                 const routeKey = getRouteKey(sys.id, connId);
                 const routeData = gameState.routes.get(routeKey);
                 if (!routeData || !routeData.fleets) continue;
+                const isDirect = currentSys && sys.id === currentSys.id && directConnIds.has(connId);
                 const angle = Math.atan2(other.y - sys.y, other.x - sys.x);
+                let firstRevealed = false;
                 for (const fleet of routeData.fleets) {
                     if (fleet.done) continue;
                     const gx = sys.x + (other.x - sys.x) * fleet._crossT;
@@ -981,10 +993,32 @@ class GalaxyRenderer {
                     const cx = this.translateX + gx * zx;
                     const cy = this.translateY + gy * zy;
                     const isHov = this.hoveredFleet && this.hoveredFleet.fleet === fleet;
-                    this.drawFleetIcon(fleet, cx, cy, angle, isHov);
+                    if (isDirect && !firstRevealed) {
+                        firstRevealed = true;
+                        this.drawFleetIcon(fleet, cx, cy, angle, isHov);
+                    } else {
+                        this.drawFleetIconUnknown(cx, cy, isHov);
+                    }
                 }
             }
         }
+    }
+
+    drawFleetIconUnknown(cx, cy, isHovered) {
+        const r = isHovered ? 9 : 7;
+        this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        this.ctx.fillStyle = isHovered ? '#555' : '#333';
+        this.ctx.fill();
+        this.ctx.fillStyle = '#777';
+        this.ctx.font = `bold ${Math.round(r * 1.4)}px Courier New`;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText('?', cx, cy);
+        this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'alphabetic';
+        this.ctx.restore();
     }
 
     drawFleetIcon(fleet, cx, cy, angle, isHovered) {
@@ -1027,17 +1061,24 @@ class GalaxyRenderer {
         const systems = window.galaxyMapSystems;
         const systemMap = new Map(systems.map(s => [s.id, s]));
         const hitRadius = 12 / (this.scaleX * this.zoom);
+        const currentSys = gameState.currentSystem;
+        const directConnIds = new Set(currentSys ? currentSys.connections : []);
 
         for (const sys of systems) {
             if (!sys.seen || !sys.connections) continue;
             for (const connId of sys.connections) {
                 const other = systemMap.get(connId);
                 if (!other || !other.seen) continue;
+                const isDirect = currentSys && sys.id === currentSys.id && directConnIds.has(connId);
                 const routeKey = getRouteKey(sys.id, connId);
                 const routeData = gameState.routes.get(routeKey);
                 if (!routeData || !routeData.fleets) continue;
+                let firstRevealed = false;
                 for (const fleet of routeData.fleets) {
                     if (fleet.done) continue;
+                    const isVisible = isDirect && !firstRevealed;
+                    if (isDirect && !firstRevealed) firstRevealed = true;
+                    if (!isVisible) continue;
                     const gx = sys.x + (other.x - sys.x) * fleet._crossT;
                     const gy = sys.y + (other.y - sys.y) * fleet._crossT;
                     if (distance(galaxyX, galaxyY, gx, gy) <= hitRadius) {

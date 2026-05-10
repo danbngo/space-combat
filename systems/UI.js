@@ -1,6 +1,6 @@
 // UI System
 class UISystem {
-    static stationTab = 'orbit';
+    static stationTab = 'shipyard';
     static combatTab = 'actions';
     static currentStationOffer = null;
     static currentModuleOffer = null;
@@ -83,13 +83,14 @@ class UISystem {
             const isFled = ship.fled && ship.alive;
 
             const nameLabel = ship.name || String(i + 1);
+            const levelLabel = (ship.level && ship.level > 1) ? ` <span style="color:#ffdd44;font-size:0.75em;">Lv${ship.level}</span>` : '';
             const typeDesc = CONSTANTS.SHIP_TYPES.find(t => t.type === ship.shipType)?.description || '';
             const tipAttr  = typeDesc ? ` data-tooltip="${typeDesc}"` : '';
             const numCell = isDead
-                ? `<span style="color:#ff3333;"${tipAttr}>${nameLabel}</span>`
+                ? `<span style="color:#ff3333;"${tipAttr}>${nameLabel}</span>${levelLabel}`
                 : isFled
-                ? `<span style="color:#ffaa44;"${tipAttr}>${nameLabel} (fled)</span>`
-                : tipAttr ? `<span style="cursor:help;"${tipAttr}>${nameLabel}</span>` : nameLabel;
+                ? `<span style="color:#ffaa44;"${tipAttr}>${nameLabel} (fled)</span>${levelLabel}`
+                : `<span style="cursor:help;"${tipAttr}>${nameLabel}</span>${levelLabel}`;
 
             const hullCell = bars
                 ? this.renderStatBar(ship.hull, ship.maxHull, hullColor)
@@ -261,7 +262,7 @@ class UISystem {
                 const connected = gameState.systems.find(s => s.id === id);
                 return connected ? connected.name : null;
             }).filter(Boolean).join(', ') || 'None';
-            const stationLabel = { shipyard: 'Shipyard', mechanic: 'Mechanic', courthouse: 'Courthouse' }[sys.stationType] || 'None';
+            const stationLabel = { shipyard: 'Shipyard', blackmarket: 'Black Market', mechanic: 'Mechanic', courthouse: 'Courthouse' }[sys.stationType] || 'None';
             content.innerHTML = `
                 <div class="station-section">
                     <p><strong>Status:</strong> Visited</p>

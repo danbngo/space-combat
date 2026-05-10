@@ -7,10 +7,6 @@ const CONSTANTS_MODULES = {
     DEBRIS_MOMENTUM:     15,  // px ship lurches forward on debris launch
 
     MODULES: [
-        { id: 'hull_plating',         name: 'Hull Plating',       cost: 150, desc: '+10 max hull',                                                                                          effect: { stat: 'maxHull',    amount: 10 } },
-        { id: 'shield_booster',       name: 'Shield Booster',     cost: 150, desc: '+10 max shields',                                                                                        effect: { stat: 'maxShields', amount: 10 } },
-        { id: 'targeting_sys',        name: 'Targeting System',   cost: 200, desc: '+3 radar — increases laser accuracy and range',                                                          effect: { stat: 'radar',      amount: 3  } },
-        { id: 'engine_upgrade',       name: 'Engine Upgrade',     cost: 175, desc: '+3 engine — increases movement range and ram damage',                                                   effect: { stat: 'engine',     amount: 3  } },
         { id: 'combat_ai',            name: 'Combat AI',          cost: 300, desc: '25% chance to gain a bonus action at the start of each turn',                                           effect: { type: 'bonus_action', chance: 0.25 } },
         { id: 'blink_drive',          name: 'Blink Drive',        cost: 275, desc: 'Grants Blink: instantly teleport a short distance in any direction — bypasses all obstacles',          effect: { type: 'special_move', move: 'blink' }, internal: true },
         { id: 'afterburner_drive',    name: 'Afterburner',        cost: 300, desc: 'Grants Afterburner: 2.5× range straight-line dash that deals engine damage to ships caught in your path', effect: { type: 'special_move', move: 'afterburner' } },
@@ -28,7 +24,6 @@ const CONSTANTS_MODULES = {
         { id: 'mark_module',          name: 'Target Designator',  cost: 375, desc: 'Grants Mark: paint a ship in the forward 90° cone as a priority target — all laser shots against it auto-hit for 3 turns', effect: { type: 'special_move', move: 'mark' } },
         { id: 'chaingun_mount',       name: 'Chaingun Mount',      cost: 275, desc: 'Grants Chaingun: fires 3 rounds separately — each bypasses shields, deals 50% laser damage, and has 2× the normal miss chance.', effect: { type: 'special_move', move: 'chaingun' },   exclusiveGroup: 'weapon' },
         { id: 'plasma_cannon_mount',  name: 'Plasma Cannon',       cost: 300, desc: 'Grants Plasma Cannon: half range, rolls separate shield and hull damage simultaneously — both apply regardless of shield level.',            effect: { type: 'special_move', move: 'plasma_cannon' }, exclusiveGroup: 'weapon' },
-        { id: 'ion_projector',        name: 'Ion Projector',        cost: 250, desc: '+3 laser damage — shots glow with ionized energy.',                                                                                          effect: { type: 'ion_laser', amount: 3 },              exclusiveGroup: 'weapon' },
         { id: 'rocket_pod',           name: 'Rocket Pod',          cost: 350, desc: 'Grants Rockets: guaranteed-hit warhead at a target area — laser damage to all ships in the blast radius. 1-turn cooldown.', effect: { type: 'special_move', move: 'rocket_launcher' }, exclusiveGroup: 'weapon' },
         { id: 'hull_regen_bay',       name: 'Hull Regen Bay',      cost: 225, desc: '+1 hull per round — steadily repairs battle damage each new round',                                         effect: { type: 'hull_regen',        amount: 1    }, internal: true },
         { id: 'shield_regen_coil',    name: 'Shield Regen Coil',   cost: 225, desc: '+2 shields per round — supplemental shield recovery each round',                                         effect: { type: 'shield_regen',      amount: 2    } },
@@ -60,11 +55,11 @@ const CONSTANTS_MODULES = {
 
     // Preferred module pools per faction — used when giving enemy ships modules at higher tiers
     FACTION_MODULES: {
-        pirates:   ['hull_plating', 'engine_upgrade', 'chaingun_mount', 'afterburner_drive', 'bomb_launcher', 'rocket_pod', 'deflector_array', 'plasma_cannon_mount', 'ion_projector'],
-        merchants: ['shield_booster', 'hull_regen_bay', 'shield_regen_coil', 'repair_bay', 'drone_bay', 'collision_dampeners', 'hull_plating', 'targeting_sys'],
-        police:    ['targeting_sys', 'shield_booster', 'mark_module', 'emp_blast_drive', 'tractor_beam_emitter', 'flash_emitter', 'deflector_array', 'combat_ai'],
-        soldiers:  ['hull_plating', 'shield_booster', 'targeting_sys', 'rocket_pod', 'collision_dampeners', 'plasma_cannon_mount', 'mark_module', 'torpedo_launcher'],
-        smugglers: ['engine_upgrade', 'cloak_drive', 'afterburner_drive', 'debris_launcher', 'flash_emitter', 'collision_dampeners', 'salvage_module', 'torpedo_launcher'],
+        pirates:   ['chaingun_mount', 'afterburner_drive', 'bomb_launcher', 'rocket_pod', 'deflector_array', 'plasma_cannon_mount'],
+        merchants: ['hull_regen_bay', 'shield_regen_coil', 'repair_bay', 'drone_bay', 'collision_dampeners'],
+        police:    ['mark_module', 'emp_blast_drive', 'tractor_beam_emitter', 'flash_emitter', 'deflector_array', 'combat_ai'],
+        soldiers:  ['rocket_pod', 'collision_dampeners', 'plasma_cannon_mount', 'mark_module', 'torpedo_launcher'],
+        smugglers: ['cloak_drive', 'afterburner_drive', 'debris_launcher', 'flash_emitter', 'collision_dampeners', 'salvage_module', 'torpedo_launcher'],
         aliens:    ['alien_blink', 'alien_swap', 'alien_mirror', 'alien_doom', 'alien_phase', 'alien_absorb', 'alien_teleport', 'alien_stasis', 'alien_ravager', 'alien_scatter', 'alien_attractor', 'possess_module', 'alien_swarm', 'alien_webbing', 'alien_timeslip', 'alien_frenzy', 'alien_neutralize', 'alien_gamma_ray'],
     },
 };
