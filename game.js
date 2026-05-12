@@ -198,6 +198,7 @@ const GameController = {
     startGame: function() {
         gameState.state = GAME_STATE.GALAXY;
         UISystem.showScreen('galaxyScreen');
+        if (galaxyRenderer) { galaxyRenderer.resizeCanvas(); galaxyRenderer.initializeZoom(); }
         UISystem.updateGalaxyScreen(gameState);
     },
     
@@ -411,11 +412,18 @@ const GameController = {
             if (encounter.faction === 'soldiers')  fleetDesc = `A soldier patrol of <strong>${encounter.size} ships</strong> ahead.`;
             if (encounter.faction === 'smugglers') fleetDesc = `A smuggler convoy of <strong>${encounter.size} ships</strong> ahead.`;
 
-            bodyEl.innerHTML = `${detLine}<p>${fleetDesc}</p>
-                <p style="color:#aaa;font-size:0.82em;margin-top:0.3em;">Each option has a <strong>50%</strong> chance of success.</p>`;
+            const isNeutral = encounter.faction === 'merchants' || encounter.faction === 'smugglers';
+
+            if (isNeutral) {
+                bodyEl.innerHTML = `${detLine}<p>${fleetDesc}</p>
+                    <p style="color:#aaa;font-size:0.82em;margin-top:0.3em;">Ambush has a <strong>50%</strong> chance of success. They won't attack you unprovoked.</p>`;
+            } else {
+                bodyEl.innerHTML = `${detLine}<p>${fleetDesc}</p>
+                    <p style="color:#aaa;font-size:0.82em;margin-top:0.3em;">Each option has a <strong>50%</strong> chance of success.</p>`;
+            }
 
             engageBtn.textContent = 'Ambush';
-            retreatBtn.textContent = 'Sneak Around';
+            retreatBtn.textContent = isNeutral ? 'Ignore' : 'Sneak Around';
             retreatBtn.style.display = '';
 
             engageBtn.onclick = () => {
@@ -430,21 +438,25 @@ const GameController = {
                 }
             };
 
-            retreatBtn.onclick = () => {
-                const sneakSuccess = Math.random() < 0.5;
-                retreatBtn.style.display = 'none';
-                if (sneakSuccess) {
-                    bodyEl.innerHTML = `<p style="color:#00ff88;"><strong>✓ Sneak successful!</strong></p>
-                        <p style="color:#aaa;font-size:0.88em;">You slipped past undetected.</p>`;
-                    engageBtn.textContent = 'Continue';
-                    engageBtn.onclick = () => { closeModal(); onContinue(); };
-                } else {
-                    bodyEl.innerHTML = `<p style="color:#ff4444;"><strong>✗ Sneak failed!</strong></p>
-                        <p style="color:#aaa;font-size:0.88em;">They spotted you — prepare for combat.</p>`;
-                    engageBtn.textContent = 'Fight';
-                    engageBtn.onclick = () => { closeModal(); startCombatWith(false, { enemyFirst: true }, computeFameDelta(encounter.faction, false)); };
-                }
-            };
+            if (isNeutral) {
+                retreatBtn.onclick = () => { closeModal(); onContinue(); };
+            } else {
+                retreatBtn.onclick = () => {
+                    const sneakSuccess = Math.random() < 0.5;
+                    retreatBtn.style.display = 'none';
+                    if (sneakSuccess) {
+                        bodyEl.innerHTML = `<p style="color:#00ff88;"><strong>✓ Sneak successful!</strong></p>
+                            <p style="color:#aaa;font-size:0.88em;">You slipped past undetected.</p>`;
+                        engageBtn.textContent = 'Continue';
+                        engageBtn.onclick = () => { closeModal(); onContinue(); };
+                    } else {
+                        bodyEl.innerHTML = `<p style="color:#ff4444;"><strong>✗ Sneak failed!</strong></p>
+                            <p style="color:#aaa;font-size:0.88em;">They spotted you — prepare for combat.</p>`;
+                        engageBtn.textContent = 'Fight';
+                        engageBtn.onclick = () => { closeModal(); startCombatWith(false, { enemyFirst: true }, computeFameDelta(encounter.faction, false)); };
+                    }
+                };
+            }
         } else {
             // ── DETECTED: normal faction encounter ─────────────────────────────────
             const detLine = `<p style="color:#ff6644;font-size:0.85em;margin-bottom:0.3em;">

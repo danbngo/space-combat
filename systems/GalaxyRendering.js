@@ -41,8 +41,6 @@ class GalaxyRenderer {
             x: Math.random(), y: Math.random(),
             b: Math.floor(180 + Math.random() * 76)
         }));
-        this.visibleUnseenIds = new Set();
-
         // Don't fit/reset zoom here - will be done after canvas is properly sized
         this.setupEventListeners();
     }
@@ -124,11 +122,73 @@ class GalaxyRenderer {
         console.log(`[GalaxyZoom] centered on system "${system.name}" at zoom ${this.zoom.toFixed(2)}`);
     }
     
+    zoomToLocalArea() {
+        if (typeof gameState === 'undefined' || !gameState.currentSystem || !gameState.systems) return false;
+        const currentSystem = gameState.currentSystem;
+        const systems = gameState.systems;
+
+        // BFS: collect all systems within 2 hops
+        const systemMap = new Map(systems.map(s => [s.id, s]));
+        const inRange = new Set([currentSystem.id]);
+        let frontier = [currentSystem];
+        for (let h = 0; h < 2; h++) {
+            const next = [];
+            for (const sys of frontier) {
+                if (!sys.connections) continue;
+                for (const connId of sys.connections) {
+                    if (!inRange.has(connId)) {
+                        inRange.add(connId);
+                        const neighbor = systemMap.get(connId);
+                        if (neighbor) next.push(neighbor);
+                    }
+                }
+            }
+            frontier = next;
+        }
+
+        const localSystems = systems.filter(s => inRange.has(s.id));
+        if (localSystems.length === 0) return false;
+
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const s of localSystems) {
+            minX = Math.min(minX, s.x);
+            maxX = Math.max(maxX, s.x);
+            minY = Math.min(minY, s.y);
+            maxY = Math.max(maxY, s.y);
+        }
+
+        const padding = 80;
+        const rangeX = maxX - minX || 1;
+        const rangeY = maxY - minY || 1;
+        const fitZoom = Math.min(
+            (this.canvas.width  - padding * 2) / (rangeX * this.scaleX),
+            (this.canvas.height - padding * 2) / (rangeY * this.scaleY),
+            this.maxZoom
+        );
+        this.zoom = Math.max(this.minZoom, fitZoom);
+
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        this.translateX = this.canvas.width  / 2 - cx * this.scaleX * this.zoom;
+        this.translateY = this.canvas.height / 2 - cy * this.scaleY * this.zoom;
+
+        this.updateZoom();
+        console.log(`[GalaxyZoom] zoomed to 2-hop local area, zoom=${this.zoom.toFixed(2)}`);
+        return true;
+    }
+
     resetZoom() {
+        if (this.zoomToLocalArea()) {
+            if (typeof gameState !== 'undefined') {
+                this.render(gameState.systems, gameState.currentSystem);
+            }
+            return;
+        }
+
+        // Fallback: center on current system at default zoom
         this.zoom = CONSTANTS.GALAXY_DEFAULT_ZOOM;
         const zoomedScaleX = this.scaleX * this.zoom;
         const zoomedScaleY = this.scaleY * this.zoom;
-
         if (typeof gameState !== 'undefined' && gameState.currentSystem) {
             this.translateX = this.canvas.width / 2 - gameState.currentSystem.x * zoomedScaleX;
             this.translateY = this.canvas.height / 2 - gameState.currentSystem.y * zoomedScaleY;
@@ -136,7 +196,6 @@ class GalaxyRenderer {
             this.translateX = (this.canvas.width - CONSTANTS.GALAXY_WIDTH * zoomedScaleX) / 2;
             this.translateY = (this.canvas.height - CONSTANTS.GALAXY_HEIGHT * zoomedScaleY) / 2;
         }
-
         this.updateZoom();
         console.log(`[GalaxyZoom] reset zoom to ${this.zoom.toFixed(2)} centered on player system`);
         if (typeof gameState !== 'undefined') {
@@ -255,14 +314,22 @@ class GalaxyRenderer {
         const sx = this.translateX + (from.x + (to.x - from.x) * progress) * zx;
         const sy = this.translateY + (from.y + (to.y - from.y) * progress) * zy;
         const angle = Math.atan2(to.y - from.y, to.x - from.x);
-        const S = 8;
+        const S = 16;
+
+        const spriteId  = leaderShip ? leaderShip.shipType.toLowerCase().replace(/ /g, '_') : null;
+        const spriteImg = spriteId && typeof spriteSystem !== 'undefined' ? spriteSystem.getImage(spriteId) : null;
 
         this.ctx.save();
         this.ctx.translate(sx, sy);
         this.ctx.rotate(angle);
-        this.ctx.fillStyle = '#00ff88';
-        drawShipShape(this.ctx, verts, S);
-        this.ctx.fill();
+        if (spriteImg) {
+            const spriteScale = (S * 2) / Math.max(spriteImg.naturalWidth, spriteImg.naturalHeight);
+            spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale);
+        } else {
+            this.ctx.fillStyle = '#00ff88';
+            drawShipShape(this.ctx, verts, S);
+            this.ctx.fill();
+        }
         this.ctx.restore();
     }
 
@@ -295,7 +362,7 @@ class GalaxyRenderer {
         const zy = this.scaleY * this.zoom;
         const cx = this.translateX + system.x * zx;
         const cy = this.translateY + system.y * zy;
-        const S = 8 * (typeData?.sizeMult ?? 1.0);
+        const S = 16 * (typeData?.sizeMult ?? 1.0);
         const orbitR = CONSTANTS.GALAXY_SYSTEM_RADIUS + S + 3;
         // one full revolution every 2 seconds
         const orbitAngle = (Date.now() / 2000) * Math.PI * 2;
@@ -456,7 +523,7 @@ class GalaxyRenderer {
         let closestDist = hitRadius;
         
         for (let system of window.galaxyMapSystems) {
-            if (!system.seen && !this.visibleUnseenIds.has(system.id)) continue;
+            if (!system.seen) continue;
             const dist = distance(x, y, system.x, system.y);
             if (dist <= hitRadius) {
                 closest = system;
@@ -504,15 +571,6 @@ class GalaxyRenderer {
             const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
             const encLabel = routeData.maxEncounters === 1 ? '1 enc.' : `1–${routeData.maxEncounters} enc.`;
             html += `<br>${tierLabel} · ${strLabel} threat · ${encLabel}`;
-            const topFactions = Object.entries(routeData.factionWeights)
-                .filter(([, w]) => w > 5).sort(([, a], [, b]) => b - a).slice(0, 2);
-            if (topFactions.length) {
-                const names = topFactions.map(([id]) => {
-                    const fd = CONSTANTS.FACTIONS.find(f => f.id === id);
-                    return fd ? fd.name : id;
-                });
-                html += `<br>${names.join(', ')}`;
-            }
             const hazards = [];
             if (routeData.hasAsteroids) hazards.push('Asteroids');
             if (routeData.cloudType) hazards.push(`${routeData.cloudType.charAt(0).toUpperCase() + routeData.cloudType.slice(1)} clouds`);
@@ -632,7 +690,6 @@ class GalaxyRenderer {
     
     drawAllConnections(systems) {
         const drawnPairs = new Set();
-        this.visibleUnseenIds = new Set();
 
         systems.forEach(system => {
             if (!system.connections) return;
@@ -644,10 +701,6 @@ class GalaxyRenderer {
                 if (!otherSystem) return;
                 if (system.seen && otherSystem.seen) {
                     this.drawConnectionLine(system, otherSystem, '#808080');
-                } else if (system.seen || otherSystem.seen) {
-                    this.drawConnectionLine(system, otherSystem, '#2a2a3a');
-                    if (!system.seen) this.visibleUnseenIds.add(system.id);
-                    if (!otherSystem.seen) this.visibleUnseenIds.add(otherSystem.id);
                 }
             });
         });
@@ -776,7 +829,7 @@ class GalaxyRenderer {
         // Show as '?' if: unseen, or (unvisited AND not directly reachable AND not current)
         const showAsUnknown = !system.seen || (!system.visited && !isReachable && !isCurrent);
         if (showAsUnknown) {
-            if (!system.seen && !this.visibleUnseenIds.has(system.id)) return;
+            if (!system.seen) return;
             this.ctx.fillStyle = '#2a2a44';
             this.ctx.beginPath();
             this.ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -1005,7 +1058,7 @@ class GalaxyRenderer {
     }
 
     drawFleetIconUnknown(cx, cy, isHovered) {
-        const r = isHovered ? 9 : 7;
+        const r = isHovered ? 21 : 16;
         this.ctx.save();
         this.ctx.beginPath();
         this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -1026,7 +1079,11 @@ class GalaxyRenderer {
         const color = factionData ? factionData.color : '#ffffff';
         const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === fleet.leaderType);
         const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
-        const S = isHovered ? 9 : 7;
+        const baseS = 16 * (typeData?.sizeMult ?? 1.0);
+        const S = isHovered ? baseS * 1.3 : baseS;
+
+        const spriteId  = fleet.leaderType ? fleet.leaderType.toLowerCase().replace(/ /g, '_') : null;
+        const spriteImg = spriteId && typeof spriteSystem !== 'undefined' ? spriteSystem.getImage(spriteId) : null;
 
         this.ctx.save();
         this.ctx.translate(cx, cy);
@@ -1035,14 +1092,19 @@ class GalaxyRenderer {
             this.ctx.shadowBlur = 12;
             this.ctx.shadowColor = color;
         }
-        this.ctx.fillStyle = color;
-        drawShipShape(this.ctx, verts, S);
-        this.ctx.fill();
+        if (spriteImg) {
+            const spriteScale = (S * 2) / Math.max(spriteImg.naturalWidth, spriteImg.naturalHeight);
+            spriteSystem.draw(this.ctx, spriteId, 0, 0, Math.PI / 2, spriteScale, { tint: color, tintAlpha: 0.5 });
+        } else {
+            this.ctx.fillStyle = color;
+            drawShipShape(this.ctx, verts, S);
+            this.ctx.fill();
+        }
         this.ctx.restore();
 
         // Size badge — circle + ship count
-        const badgeX = cx + 7;
-        const badgeY = cy - 7;
+        const badgeX = cx + Math.round(baseS * 0.9);
+        const badgeY = cy - Math.round(baseS * 0.9);
         this.ctx.save();
         this.ctx.beginPath();
         this.ctx.arc(badgeX, badgeY, 5.5, 0, Math.PI * 2);

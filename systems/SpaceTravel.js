@@ -122,13 +122,12 @@ class SpaceTravel {
         // Max encounter slots scale with tier (1 at tier 1, up to ROUTE_MAX_ENCOUNTERS)
         const maxEncounters = Math.max(1, Math.round(1 + (tierFrac * (CONSTANTS.ROUTE_MAX_ENCOUNTERS - 1))));
 
-        // Faction weights: humans dominate early, aliens ramp in from tier ALIEN_WEIGHT_START_TIER
-        const alienStart = CONSTANTS.ALIEN_WEIGHT_START_TIER;
-        const alienFrac  = destinationTier >= alienStart
-            ? Math.pow((destinationTier - alienStart) / (QUEEN_TIER - alienStart), 1.4)
+        // Faction weights: aliens ramp linearly from 0 at ALIEN_WEIGHT_START_TIER to 100% at QUEEN_TIER
+        const alienStart  = CONSTANTS.ALIEN_WEIGHT_START_TIER;
+        const alienWeight = destinationTier >= alienStart
+            ? Math.min(100, ((destinationTier - alienStart) / (QUEEN_TIER - alienStart)) * 100)
             : 0;
-        const alienWeight = alienFrac * 80;
-        const humanPool   = Math.max(0, 100 - alienWeight);
+        const humanPool = Math.max(0, 100 - alienWeight);
 
         const factionWeights = {
             pirates:   humanPool * 0.28,
@@ -214,12 +213,9 @@ class SpaceTravel {
         };
 
         const encounters = [];
-        const span = 0.70;
-        const step = span / maxEncounters;
 
         for (let i = 0; i < maxEncounters; i++) {
-            const baseT = 0.15 + step * i + step * 0.1 + Math.random() * step * 0.8;
-            const crossT = Math.min(0.85, Math.max(0.15, baseT));
+            const crossT = (i + 1) / (maxEncounters + 1);
             const faction = pickFaction(factionWeights);
             const size = fleetStrength <= 3 ? randomInt(1, 2) : fleetStrength <= 6 ? randomInt(2, 4) : randomInt(3, 6);
             encounters.push({ faction, size, fleetStrength, _crossT: crossT, leaderType: pickLeader(faction, fleetStrength), done: false });

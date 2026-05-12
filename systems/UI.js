@@ -23,15 +23,13 @@ class UISystem {
     
     static updateGalaxyScreen(gameState) {
         const currentSystemName = gameState.currentSystem ? gameState.currentSystem.name : 'None';
-        document.getElementById('currentSystem').textContent = `Current System: ${currentSystemName}`;
+        document.getElementById('currentSystem').textContent = `Current Station: ${currentSystemName}`;
 
         this.updatePlayerStatusPanel(gameState);
         this.updateCurrentSystemSection(gameState);
         this.updateSelectedSystemSection(gameState);
 
         if (galaxyRenderer && gameState.systems) {
-            galaxyRenderer.resizeCanvas();
-            galaxyRenderer.initializeZoom();
             galaxyRenderer.render(gameState.systems, gameState.currentSystem);
             galaxyRenderer.startLoop();
         }
@@ -189,7 +187,7 @@ class UISystem {
             currentActions.innerHTML = '';
             return;
         }
-        currentActions.innerHTML = `<button id="showSystemButton" class="btn-primary">Show System</button>`;
+        currentActions.innerHTML = `<button id="showSystemButton" class="btn-primary">Visit Station</button>`;
         this.setupCurrentSystemButtons(gameState);
     }
 
@@ -316,14 +314,8 @@ class UISystem {
         const info = document.getElementById('travelRouteInfo');
         if (info && routeData) {
             const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
-            const topFactions = Object.entries(routeData.factionWeights)
-                .filter(([, w]) => w > 5).sort(([, a], [, b]) => b - a).slice(0, 3)
-                .map(([id, w]) => {
-                    const fd = CONSTANTS.FACTIONS.find(f => f.id === id);
-                    return `<span style="color:${fd ? fd.color : '#fff'};">${fd ? fd.name : id} ${Math.round(w)}%</span>`;
-                }).join(' &nbsp;·&nbsp; ');
             const encCount = (encounters || []).length;
-            info.innerHTML = `Threat: <strong>${strLabel}</strong> (${routeData.fleetStrength}/10) &nbsp;·&nbsp; ${encCount} encounter${encCount !== 1 ? 's' : ''} on this route<br>${topFactions}`;
+            info.innerHTML = `Threat: <strong>${strLabel}</strong> (${routeData.fleetStrength}/10) &nbsp;·&nbsp; ${encCount} encounter${encCount !== 1 ? 's' : ''} on this route`;
         } else if (info) {
             info.textContent = '';
         }
@@ -503,15 +495,13 @@ class UISystem {
         if (info && routeData) {
             const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
             const tierLabel = route.to.isQueenPlanet ? 'Alien Queen\'s Lair' : `Tier ${route.to.tier}`;
-            const factionRows = Object.entries(routeData.factionWeights)
-                .filter(([, w]) => w > 5).sort(([, a], [, b]) => b - a).slice(0, 4)
-                .map(([id, w]) => {
-                    const fd = CONSTANTS.FACTIONS.find(f => f.id === id);
-                    return `<span style="color:${fd ? fd.color : '#fff'};">${fd ? fd.name : id}: ${Math.round(w)}%</span>`;
-                }).join('<br>');
+            const hazards = [];
+            if (routeData.hasAsteroids) hazards.push('Asteroids');
+            if (routeData.cloudType) hazards.push(`${routeData.cloudType.charAt(0).toUpperCase() + routeData.cloudType.slice(1)} clouds`);
+            const hazardLine = hazards.length ? `<span style="color:#ffcc44;">${hazards.join(', ')}</span>` : '<span style="color:#555;">None</span>';
             info.innerHTML = `<p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">${tierLabel} · Threat: ${strLabel} (${routeData.fleetStrength}/10)</p>
                 <p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">1–${routeData.maxEncounters} encounters</p>
-                <p style="font-size:0.85em;margin:0.4em 0 0;">Factions:<br>${factionRows}</p>`;
+                <p style="font-size:0.85em;margin:0.3em 0 0;">Hazards: ${hazardLine}</p>`;
         } else if (info) {
             info.innerHTML = '<p style="color:#555;font-size:0.85em;">No route data.</p>';
         }
