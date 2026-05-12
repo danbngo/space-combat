@@ -36,6 +36,8 @@ class GalaxyRenderer {
         
         this._loopRunning = false;
         this._snapBackTimer = null;
+        this._showAll = false;
+        this._cachedVisSet = null;
 
         this._stars = Array.from({ length: 200 }, () => ({
             x: Math.random(), y: Math.random(),
@@ -43,6 +45,71 @@ class GalaxyRenderer {
         }));
         // Don't fit/reset zoom here - will be done after canvas is properly sized
         this.setupEventListeners();
+    }
+
+    // Compute the set of system IDs that should be visible on the map.
+    // Includes: path ancestors (visited systems leading to current), current system,
+    // and all forward-reachable seen systems from the current position.
+    _computeVisSet(systems, currentSystem) {
+        if (!currentSystem) {
+            return new Set(systems.filter(s => s.visited || s.seen).map(s => s.id));
+        }
+        const systemMap = new Map(systems.map(s => [s.id, s]));
+        const visSet = new Set();
+
+        // Build reverse adjacency (who connects TO this system)
+        const reverseAdj = new Map();
+        for (const s of systems) {
+            for (const connId of (s.connections || [])) {
+                if (!reverseAdj.has(connId)) reverseAdj.set(connId, []);
+                reverseAdj.get(connId).push(s.id);
+            }
+        }
+
+        // BFS backward through visited systems to find ancestors on the player's path
+        const backQueue = [currentSystem.id];
+        const backSeen = new Set([currentSystem.id]);
+        while (backQueue.length) {
+            const sId = backQueue.shift();
+            visSet.add(sId);
+            for (const pId of (reverseAdj.get(sId) || [])) {
+                if (backSeen.has(pId)) continue;
+                const p = systemMap.get(pId);
+                if (p && p.visited) {
+                    backSeen.add(pId);
+                    backQueue.push(pId);
+                }
+            }
+        }
+
+        // BFS forward through seen systems reachable from current system
+        const fwdQueue = [...(currentSystem.connections || [])];
+        const fwdSeen = new Set([currentSystem.id, ...fwdQueue]);
+        while (fwdQueue.length) {
+            const sId = fwdQueue.shift();
+            const s = systemMap.get(sId);
+            if (!s || !s.seen) continue;
+            visSet.add(sId);
+            for (const connId of (s.connections || [])) {
+                if (fwdSeen.has(connId)) continue;
+                const conn = systemMap.get(connId);
+                if (conn && conn.seen) {
+                    fwdSeen.add(connId);
+                    fwdQueue.push(connId);
+                }
+            }
+        }
+
+        return visSet;
+    }
+
+    _isVis(system) {
+        if (this._showAll) {
+            const ct = (typeof gameState !== 'undefined' && gameState.currentSystem)
+                ? gameState.currentSystem.tier : 0;
+            return system.visited || (system.seen && system.tier >= ct);
+        }
+        return this._cachedVisSet ? this._cachedVisSet.has(system.id) : (system.visited || system.seen);
     }
     
     resizeCanvas() {
@@ -216,6 +283,18 @@ class GalaxyRenderer {
         this.canvas.addEventListener('click', (e) => this.onClick(e));
         this.canvas.addEventListener('mouseleave', () => this.onMouseLeave());
         this.canvas.addEventListener('wheel', (e) => this.onMouseWheel(e), { passive: false });
+
+        const toggleBtn = document.getElementById('galaxyShowAllBtn');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                this._showAll = !this._showAll;
+                toggleBtn.textContent = this._showAll ? 'Hide Unreachable' : 'Show All';
+                toggleBtn.style.opacity = this._showAll ? '1' : '0.6';
+                if (typeof gameState !== 'undefined') {
+                    this.render(gameState.systems, gameState.currentSystem);
+                }
+            });
+        }
     }
     
     onMouseMove(e) {
@@ -314,7 +393,7 @@ class GalaxyRenderer {
         const sx = this.translateX + (from.x + (to.x - from.x) * progress) * zx;
         const sy = this.translateY + (from.y + (to.y - from.y) * progress) * zy;
         const angle = Math.atan2(to.y - from.y, to.x - from.x);
-        const S = 16;
+        const S = 16 * (typeData?.sizeMult ?? 1.0);
 
         const spriteId  = leaderShip ? leaderShip.shipType.toLowerCase().replace(/ /g, '_') : null;
         const spriteImg = spriteId && typeof spriteSystem !== 'undefined' ? spriteSystem.getImage(spriteId) : null;
@@ -523,7 +602,7 @@ class GalaxyRenderer {
         let closestDist = hitRadius;
         
         for (let system of window.galaxyMapSystems) {
-            if (!system.seen) continue;
+            if (!this._isVis(system)) continue;
             const dist = distance(x, y, system.x, system.y);
             if (dist <= hitRadius) {
                 closest = system;
@@ -544,10 +623,10 @@ class GalaxyRenderer {
         let closest = null;
         let closestDist = threshold;
         for (const sys of window.galaxyMapSystems) {
-            if (!sys.seen || !sys.connections) continue;
+            if (!this._isVis(sys) || !sys.connections) continue;
             for (const connId of sys.connections) {
                 const other = window.galaxyMapSystems.find(s => s.id === connId);
-                if (!other || !other.seen) continue;
+                if (!other || !this._isVis(other)) continue;
                 const d = distancePointToLineSegment(galaxyX, galaxyY, sys.x, sys.y, other.x, other.y);
                 if (d < closestDist) {
                     closestDist = d;
@@ -600,10 +679,18 @@ class GalaxyRenderer {
 
     render(systems, currentSystem) {
         this.clear();
-        
+
         // Store systems in window for getSystemAtPosition
         window.galaxyMapSystems = systems;
-        
+
+        // Compute visibility set for this frame
+        if (!this._showAll) {
+            this._cachedVisSet = this._computeVisSet(systems, currentSystem);
+        }
+
+        // Draw route hazard decorations under everything (above stars only)
+        this.drawRouteHazards(systems, currentSystem);
+
         // Draw all connections first (all gray)
         this.drawAllConnections(systems);
         
@@ -638,9 +725,10 @@ class GalaxyRenderer {
             this.drawConnectionLine(this.hoveredRoute.from, this.hoveredRoute.to, '#ffffff', 4);
         }
         
-        // Draw all systems
+        // Draw visible systems
         const travelFromId = this._travelAnim ? this._travelAnim.from.id : null;
         systems.forEach(system => {
+            if (!this._isVis(system)) return;
             const isReachable = currentSystem.connections && currentSystem.connections.includes(system.id);
             const isHovered = this.hoveredSystem && this.hoveredSystem.id === system.id;
             const isSelected = this.selectedSystem && this.selectedSystem.id === system.id;
@@ -692,20 +780,108 @@ class GalaxyRenderer {
         const drawnPairs = new Set();
 
         systems.forEach(system => {
-            if (!system.connections) return;
+            if (!this._isVis(system) || !system.connections) return;
             system.connections.forEach(connId => {
                 const pairKey = getRouteKey(system.id, connId);
                 if (drawnPairs.has(pairKey)) return;
                 drawnPairs.add(pairKey);
                 const otherSystem = systems.find(s => s.id === connId);
-                if (!otherSystem) return;
-                if (system.seen && otherSystem.seen) {
-                    this.drawConnectionLine(system, otherSystem, '#808080');
-                }
+                if (!otherSystem || !this._isVis(otherSystem)) return;
+                this.drawConnectionLine(system, otherSystem, '#808080');
             });
         });
     }
     
+    // Deterministic hash: maps (routeSeed, index) → [0, 1)
+    _seededVal(seed, index) {
+        let s = Math.imul(seed ^ 0xdeadbeef, 0x45d9f3b) + index * 0x6c62272e | 0;
+        s = Math.imul(s ^ (s >>> 16), 0x45d9f3b) | 0;
+        return (s >>> 0) / 0x100000000;
+    }
+
+    _routeSeed(routeKey) {
+        let h = 2166136261;
+        for (let i = 0; i < routeKey.length; i++) {
+            h ^= routeKey.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+    }
+
+    drawRouteHazards(systems, currentSystem) {
+        if (!gameState || !gameState.routes) return;
+        const systemMap  = new Map(systems.map(s => [s.id, s]));
+        const drawnPairs = new Set();
+        const zx = this.scaleX * this.zoom;
+        const zy = this.scaleY * this.zoom;
+
+        for (const sys of systems) {
+            if (!this._isVis(sys) || !sys.connections) continue;
+            for (const connId of sys.connections) {
+                const pairKey = getRouteKey(sys.id, connId);
+                if (drawnPairs.has(pairKey)) continue;
+                drawnPairs.add(pairKey);
+                const other = systemMap.get(connId);
+                if (!other || !this._isVis(other)) continue;
+
+                const routeData = gameState.routes.get(pairKey);
+                if (!routeData) continue;
+                if (routeData.hasAsteroids) this._drawAsteroidHazards(sys, other, pairKey, zx, zy);
+                if (routeData.cloudType)    this._drawCloudHazards(sys, other, pairKey, routeData.cloudType, zx, zy);
+            }
+        }
+    }
+
+    _drawAsteroidHazards(from, to, routeKey, zx, zy) {
+        const seed = this._routeSeed(routeKey);
+        const dx = to.x - from.x, dy = to.y - from.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const nx = -dy / len, ny = dx / len;
+        const count = 5;
+        this.ctx.save();
+        for (let i = 0; i < count; i++) {
+            const t    = 0.12 + this._seededVal(seed, i * 3)     * 0.76;
+            const perp = (this._seededVal(seed, i * 3 + 1) - 0.5) * 10;
+            const gx   = from.x + dx * t + nx * perp;
+            const gy   = from.y + dy * t + ny * perp;
+            const cx   = this.translateX + gx * zx;
+            const cy   = this.translateY + gy * zy;
+            const r    = 2 + this._seededVal(seed, i * 3 + 2) * 2;
+            this.ctx.beginPath();
+            this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            this.ctx.fillStyle = 'rgba(145,130,110,0.6)';
+            this.ctx.fill();
+        }
+        this.ctx.restore();
+    }
+
+    _drawCloudHazards(from, to, routeKey, cloudType, zx, zy) {
+        const seed = this._routeSeed(routeKey) ^ 0x9e3779b9;
+        const dx = to.x - from.x, dy = to.y - from.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const nx = -dy / len, ny = dx / len;
+        const [cr, cg, cb] = { dust: [180,140,55], ice: [75,200,255], plasma: [220,55,190] }[cloudType] || [150,150,150];
+        const count = 4;
+        this.ctx.save();
+        for (let i = 0; i < count; i++) {
+            const t    = 0.12 + this._seededVal(seed, i * 4)     * 0.76;
+            const perp = (this._seededVal(seed, i * 4 + 1) - 0.5) * 14;
+            const gx   = from.x + dx * t + nx * perp;
+            const gy   = from.y + dy * t + ny * perp;
+            const cx   = this.translateX + gx * zx;
+            const cy   = this.translateY + gy * zy;
+            const r    = 6 + this._seededVal(seed, i * 4 + 2) * 4;
+            const grad = this.ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+            grad.addColorStop(0, `rgba(${cr},${cg},${cb},0.28)`);
+            grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+            this.ctx.beginPath();
+            this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            this.ctx.fillStyle = grad;
+            this.ctx.fill();
+        }
+        this.ctx.restore();
+    }
+
     drawCurrentSystemConnections(systems, currentSystem) {
         // Draw connections from current system in light gray
         if (!currentSystem.connections) return;
@@ -826,14 +1002,12 @@ class GalaxyRenderer {
         const y = this.translateY + system.y * zoomedScaleY;
         const r = CONSTANTS.GALAXY_SYSTEM_RADIUS;
 
-        // Show as '?' if: unseen, or (unvisited AND not directly reachable AND not current)
+        // Show as '?' if seen but not yet visited/reachable
         const showAsUnknown = !system.seen || (!system.visited && !isReachable && !isCurrent);
         if (showAsUnknown) {
             if (!system.seen) return;
             this.ctx.fillStyle = '#2a2a44';
-            this.ctx.beginPath();
-            this.ctx.arc(x, y, r, 0, Math.PI * 2);
-            this.ctx.fill();
+            this.ctx.fillRect(x - r, y - r, r * 2, r * 2);
             this.ctx.fillStyle = '#6666aa';
             this.ctx.font = `bold ${Math.round(r * 1.4)}px Courier New`;
             this.ctx.textAlign = 'center';
@@ -846,7 +1020,7 @@ class GalaxyRenderer {
 
         // Shape and base color by station type
         const stationShape = { shipyard: 'circle', blackmarket: 'square', mechanic: 'diamond', courthouse: 'triangle' };
-        const stationBaseColor = { shipyard: '#4488ff', blackmarket: '#ff5522', mechanic: '#ffaa00', courthouse: '#cc66ff' };
+        const stationBaseColor = { shipyard: '#e8c040', blackmarket: '#aa44ff', mechanic: '#44cc88', courthouse: '#4488ff' };
         const shape = system.isQueenPlanet ? 'circle' : (stationShape[system.stationType] || 'circle');
         const baseColor = system.isQueenPlanet ? '#ff4400' : (stationBaseColor[system.stationType] || '#808080');
 
@@ -905,10 +1079,10 @@ class GalaxyRenderer {
                 courthouse:  '▲ Courthouse',
             }[system.stationType] || '';
             const stationColor = {
-                shipyard:    '#4488ff',
-                blackmarket: '#ff5522',
-                mechanic:    '#ffaa00',
-                courthouse:  '#cc66ff',
+                shipyard:    '#e8c040',
+                blackmarket: '#aa44ff',
+                mechanic:    '#44cc88',
+                courthouse:  '#4488ff',
             }[system.stationType] || '#aaa';
 
             let html = `<strong>${system.name}</strong><br>${tierLabel}`;
@@ -974,11 +1148,27 @@ class GalaxyRenderer {
         this._snapBackTimer = setTimeout(() => {
             this._snapBackTimer = null;
             this._checkAndSnapBack();
-        }, 2500);
+        }, 800);
     }
 
     _checkAndSnapBack() {
         if (typeof gameState === 'undefined' || !gameState.currentSystem) return;
+
+        // Snap back if no visible station is currently on screen.
+        const zx = this.scaleX * this.zoom;
+        const zy = this.scaleY * this.zoom;
+        const w  = this.canvas.width;
+        const h  = this.canvas.height;
+        const systems = window.galaxyMapSystems || gameState.systems || [];
+        const anyVisible = systems.some(s => {
+            if (!this._isVis(s)) return false;
+            const sx = this.translateX + s.x * zx;
+            const sy = this.translateY + s.y * zy;
+            return sx >= 0 && sx <= w && sy >= 0 && sy <= h;
+        });
+        if (anyVisible) return;
+
+        // No station on screen — snap to the player's current position.
         let gx, gy;
         if (this._travelAnim) {
             const a = this._travelAnim;
@@ -988,14 +1178,7 @@ class GalaxyRenderer {
             gx = gameState.currentSystem.x;
             gy = gameState.currentSystem.y;
         }
-        const zx = this.scaleX * this.zoom;
-        const zy = this.scaleY * this.zoom;
-        const sx = this.translateX + gx * zx;
-        const sy = this.translateY + gy * zy;
-        const pad = 60;
-        const inView = sx >= pad && sx <= this.canvas.width  - pad
-                    && sy >= pad && sy <= this.canvas.height - pad;
-        if (!inView) this._animateSnapTo(gx, gy);
+        this._animateSnapTo(gx, gy);
     }
 
     _animateSnapTo(gx, gy) {
@@ -1029,10 +1212,10 @@ class GalaxyRenderer {
         const directConnIds = new Set(currentSys ? currentSys.connections : []);
 
         for (const sys of systems) {
-            if (!sys.seen || !sys.connections) continue;
+            if (!this._isVis(sys) || !sys.connections) continue;
             for (const connId of sys.connections) {
                 const other = systemMap.get(connId);
-                if (!other || !other.seen) continue;
+                if (!other || !this._isVis(other)) continue;
                 const routeKey = getRouteKey(sys.id, connId);
                 const routeData = gameState.routes.get(routeKey);
                 if (!routeData || !routeData.fleets) continue;
@@ -1058,7 +1241,7 @@ class GalaxyRenderer {
     }
 
     drawFleetIconUnknown(cx, cy, isHovered) {
-        const r = isHovered ? 21 : 16;
+        const r = CONSTANTS.GALAXY_SYSTEM_RADIUS;
         this.ctx.save();
         this.ctx.beginPath();
         this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -1080,7 +1263,7 @@ class GalaxyRenderer {
         const typeData = CONSTANTS.SHIP_TYPES.find(t => t.type === fleet.leaderType);
         const verts = typeData ? typeData.vertices : [[1, 0], [-1, -1], [-0.5, 0], [-1, 1]];
         const baseS = 16 * (typeData?.sizeMult ?? 1.0);
-        const S = isHovered ? baseS * 1.3 : baseS;
+        const S = baseS;
 
         const spriteId  = fleet.leaderType ? fleet.leaderType.toLowerCase().replace(/ /g, '_') : null;
         const spriteImg = spriteId && typeof spriteSystem !== 'undefined' ? spriteSystem.getImage(spriteId) : null;

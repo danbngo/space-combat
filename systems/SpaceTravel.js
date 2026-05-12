@@ -16,13 +16,19 @@ class SpaceTravel {
         const byTier  = [];
         let   nextId  = 0;
 
+        // Symmetric ramp: 1,2,3,4,...,4,3,2,1 (tier 0=start, QUEEN_TIER=queen).
+        // Each station has at most 2 routes out, so cap children to parentCount*2.
+        const nodeCountForTier = (tier) => Math.min(4, tier + 1, QUEEN_TIER - tier + 1);
+
         // ── Place nodes tier by tier ─────────────────────────────────────────
         for (let tier = 0; tier < TIERS; tier++) {
             byTier.push([]);
 
+            // Cap so orphan-fix can never push a parent past 2 connections.
+            const maxFromParents = tier === 0 ? 1 : byTier[tier - 1].length * 2;
             const nodeCount = (tier === 0 || tier === QUEEN_TIER)
                 ? 1
-                : randomInt(CONSTANTS.TREE_NODES_MIN, CONSTANTS.TREE_NODES_MAX);
+                : Math.min(nodeCountForTier(tier), maxFromParents);
 
             const baseX = X_START + tier * tierStep;
 
@@ -71,12 +77,9 @@ class SpaceTravel {
             // Track which children have been connected
             const connected = new Set();
 
-            // Each parent branches to 1–BRANCHES_MAX children (closest by Y first)
+            // Each parent connects to 1 or 2 closest children
             for (const parent of parents) {
-                const maxBranches = Math.min(
-                    randomInt(CONSTANTS.TREE_BRANCHES_MIN, CONSTANTS.TREE_BRANCHES_MAX),
-                    children.length
-                );
+                const maxBranches = Math.min(randomInt(1, 2), children.length);
                 const sorted = [...children].sort((a, b) => Math.abs(a.y - parent.y) - Math.abs(b.y - parent.y));
                 let branches = 0;
                 for (const child of sorted) {
@@ -91,22 +94,92 @@ class SpaceTravel {
                 }
             }
 
-            // Ensure every child has at least one parent
+            // Ensure every child has at least one parent.
+            // Prefer parents that still have room (< 2 connections) to stay within the cap.
             for (const child of children) {
                 if (!connected.has(child.id)) {
-                    const closest = parents.reduce((a, b) =>
+                    const pool = parents.filter(p => p.connections.length < 2);
+                    const candidates = pool.length > 0 ? pool : parents;
+                    const closest = candidates.reduce((a, b) =>
                         Math.abs(a.y - child.y) < Math.abs(b.y - child.y) ? a : b
                     );
                     if (!closest.connections.includes(child.id)) {
                         closest.connections.push(child.id);
                         if (child.parentId === null) child.parentId = closest.id;
                         routes.set(getRouteKey(closest.id, child.id), this.generateRouteData(tier + 1));
+                        connected.add(child.id);
                     }
                 }
             }
         }
 
+        this.removeCrossings(systems, routes);
         return { systems, routes };
+    }
+
+    // Post-process: remove all crossing edges between adjacent tiers by swapping destinations.
+    // Two edges (A→B) and (C→D) cross when their source Y-order and destination Y-order differ.
+    // Swapping to (A→D) and (C→B) eliminates the crossing without changing connectivity.
+    static removeCrossings(systems, routes) {
+        const systemMap = new Map(systems.map(s => [s.id, s]));
+
+        const byTier = new Map();
+        for (const sys of systems) {
+            if (!byTier.has(sys.tier)) byTier.set(sys.tier, []);
+            byTier.get(sys.tier).push(sys);
+        }
+
+        const tiers = [...byTier.keys()].sort((a, b) => a - b);
+
+        for (let ti = 0; ti < tiers.length - 1; ti++) {
+            const dstTier = tiers[ti + 1];
+
+            // Collect all forward edges for this tier pair
+            const edges = [];
+            for (const src of (byTier.get(tiers[ti]) || [])) {
+                for (const dstId of src.connections) {
+                    const dst = systemMap.get(dstId);
+                    if (dst && dst.tier === dstTier) edges.push({ src, dst });
+                }
+            }
+
+            // Iteratively swap any crossing pair until the tier is crossing-free
+            let changed = true;
+            while (changed) {
+                changed = false;
+                for (let i = 0; i < edges.length; i++) {
+                    for (let j = i + 1; j < edges.length; j++) {
+                        const e1 = edges[i], e2 = edges[j];
+                        if (e1.src === e2.src || e1.dst === e2.dst) continue;
+
+                        // Crossing: source order and destination order are inverted
+                        const srcOrder = e1.src.y < e2.src.y;
+                        const dstOrder = e1.dst.y < e2.dst.y;
+                        if (srcOrder === dstOrder) continue;
+
+                        // Skip if the swap would introduce duplicate connections
+                        if (e1.src.connections.includes(e2.dst.id) ||
+                            e2.src.connections.includes(e1.dst.id)) continue;
+
+                        // Swap destinations in the connection arrays
+                        const d1 = e1.dst, d2 = e2.dst;
+                        e1.src.connections = e1.src.connections.map(id => id === d1.id ? d2.id : id);
+                        e2.src.connections = e2.src.connections.map(id => id === d2.id ? d1.id : id);
+
+                        // Migrate route data to the new keys
+                        const k1 = getRouteKey(e1.src.id, d1.id), k2 = getRouteKey(e2.src.id, d2.id);
+                        const rd1 = routes.get(k1), rd2 = routes.get(k2);
+                        routes.delete(k1); routes.delete(k2);
+                        if (rd1) routes.set(getRouteKey(e1.src.id, d2.id), rd1);
+                        if (rd2) routes.set(getRouteKey(e2.src.id, d1.id), rd2);
+
+                        e1.dst = d2;
+                        e2.dst = d1;
+                        changed = true;
+                    }
+                }
+            }
+        }
     }
 
     // Build route metadata for a route whose destination is at `destinationTier`
@@ -228,6 +301,7 @@ class SpaceTravel {
 
     static initializeStartingSystem(systems) {
         const start = systems.find(s => s.tier === 0) || systems[0];
+        start.stationType = 'shipyard';
         start.visited = true;
         this.revealFromTier(systems, 0);
         return start;

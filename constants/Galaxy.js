@@ -40,8 +40,8 @@ const CONSTANTS_GALAXY = {
 
     // Renderer
     GALAXY_DEFAULT_ZOOM:     1,
-    GALAXY_MIN_ZOOM:         0.3,
-    GALAXY_MAX_ZOOM:         20,
+    GALAXY_MIN_ZOOM:         2,
+    GALAXY_MAX_ZOOM:         5,
     GALAXY_ZOOM_STEP:        1.15,
     GALAXY_CANVAS_PADDING:   50,
     GALAXY_SYSTEM_RADIUS:     8,

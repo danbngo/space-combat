@@ -242,21 +242,35 @@ UISystem.updateCombatScreen = function(gameState, combat) {
                     const fireDis = !hasActions || !hasValidTargets || isAnimating || overheated || blinded || inStasis ? 'disabled' : '';
 
                     // Special move buttons — one per move the ship has
+                    const WEAPON_MOVES = new Set(['chaingun', 'plasma_cannon', 'rocket_launcher']);
                     const cooldowns = activeTurnShip.specialMoveCooldowns || {};
-                    const specialBtns = (activeTurnShip.specialMoves || []).map(moveId => {
+                    const weaponMove = (activeTurnShip.specialMoves || []).find(id => WEAPON_MOVES.has(id));
+
+                    const makeSpecialBtn = (moveId) => {
                         const moveDef = CONSTANTS.SPECIAL_MOVES[moveId];
                         if (!moveDef) return '';
                         const cd = cooldowns[moveId] || 0;
-                        const onCd  = cd > 0;
-                        const cloakBlocked      = moveId === 'cloak'       && hasStatus;
-                        const flashBlocked      = moveId === 'flash'       && blinded;
-                        const anchorBlocked     = anchored && ['afterburner', 'blink', 'swap', 'teleport'].includes(moveId);
-                        const stasisBlocked     = inStasis;
+                        const onCd          = cd > 0;
+                        const cloakBlocked  = moveId === 'cloak' && hasStatus;
+                        const flashBlocked  = moveId === 'flash' && blinded;
+                        const anchorBlocked = anchored && ['afterburner', 'blink', 'swap', 'teleport'].includes(moveId);
+                        const stasisBlocked = inStasis;
                         const btnDis = onCd || !hasActions || isAnimating || overheated || cloakBlocked || flashBlocked || anchorBlocked || stasisBlocked ? 'disabled' : '';
                         const label  = onCd ? `${moveDef.name} (${cd})` : moveDef.name;
                         const color  = onCd || overheated || cloakBlocked || flashBlocked || anchorBlocked || stasisBlocked ? '#555' : '#cc99ff';
                         return `<button class="btn-primary combat-special-btn" ${btnDis} data-move-id="${moveId}" style="color:${color};" data-tooltip="${moveDef.desc}">${label}</button>`;
-                    }).join('');
+                    };
+
+                    const specialBtns = (activeTurnShip.specialMoves || [])
+                        .filter(id => !WEAPON_MOVES.has(id))
+                        .map(makeSpecialBtn).join('');
+
+                    let fireOrWeaponBtn;
+                    if (weaponMove) {
+                        fireOrWeaponBtn = makeSpecialBtn(weaponMove);
+                    } else {
+                        fireOrWeaponBtn = `<button id="combatFireBtn" class="btn-primary" ${fireDis} data-tooltip="Fire lasers at an enemy within range and firing arc.">Fire</button>`;
+                    }
 
                     const rechargeTooltip = inStasis ? 'In stasis — cannot act.' :
                         (activeTurnShip.maxShields > 0 && activeTurnShip.shields >= activeTurnShip.maxShields
@@ -266,7 +280,7 @@ UISystem.updateCombatScreen = function(gameState, combat) {
                         <div style="text-align:center;font-size:0.8em;color:#aaa;margin-bottom:0.25em;">Actions: ${activeTurnShip.actionsRemaining}/2${inStasis ? ' <span style="color:#88eeff">[STASIS]</span>' : ''}</div>
                         <div class="combat-action-row">
                             <button id="combatMoveBtn" class="btn-primary" ${moveDis} data-tooltip="${anchored ? 'Cannot move — anchored!' : inStasis ? 'Cannot act — in stasis!' : 'Move your ship within range, or click an adjacent enemy to ram.'}">Move${anchored ? ' [Anchored]' : ''}</button>
-                            <button id="combatFireBtn" class="btn-primary" ${fireDis} data-tooltip="Fire lasers at an enemy within range and firing arc.">Fire</button>
+                            ${fireOrWeaponBtn}
                             <button id="combatSkipBtn" class="btn-secondary" ${dis} data-tooltip="${rechargeTooltip}">${rechargeLabel}</button>
                         </div>
                         ${specialBtns ? `<div class="combat-action-row" style="margin-top:0.3em;">${specialBtns}</div>` : ''}`;
