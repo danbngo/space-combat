@@ -1,10 +1,10 @@
 // Main Game File
 
 const PLAYER_FACTIONS = [
-    { id: 'police',    name: 'Police',    color: '#4488ff', startingShip: 'Interceptor',    startingBounty: 0,    desc: 'Law enforcement officers.',      effects: 'Cannot attack non-criminals · No bounty · 2× credits from pirate contracts' },
-    { id: 'pirates',   name: 'Pirates',   color: '#ff4444', startingShip: 'Raider',          startingBounty: 1000, desc: 'Outlaws who take what they want.', effects: 'Start with 1000 bounty · Cannot use courthouses · Enemy pirates are friendly' },
-    { id: 'merchants', name: 'Merchants', color: '#ffcc44', startingShip: 'Freighter',       startingBounty: 0,    desc: 'Shrewd traders and deal-makers.',   effects: 'All station purchases 50% cheaper' },
-    { id: 'smugglers', name: 'Smugglers', color: '#aa44ff', startingShip: 'Blockade Runner', startingBounty: 0,    desc: 'Operators in unofficial channels.',  effects: '(Coming soon)' },
+    { id: 'police',    name: 'Police',    color: '#4488ff', startingShip: 'Interceptor',    startingBounty: 0,    desc: 'Law enforcement officers.',      startingPerk: 'gunner_1',      startingItem: 'battery',       effects: 'Cannot attack non-criminals · No bounty · 2× credits from pirate contracts · Starts with Gunner I + Battery Pack' },
+    { id: 'pirates',   name: 'Pirates',   color: '#ff4444', startingShip: 'Raider',          startingBounty: 1000, desc: 'Outlaws who take what they want.', startingPerk: 'salvaging_1',   startingItem: 'nanites',       effects: 'Start with 1000 bounty · Cannot use courthouses · Enemy pirates are friendly · Starts with Salvaging I + Nanite Canister' },
+    { id: 'merchants', name: 'Merchants', color: '#ffcc44', startingShip: 'Freighter',       startingBounty: 0,    desc: 'Shrewd traders and deal-makers.',   startingPerk: 'barter_1',      startingItem: 'teleporter',    effects: 'Merchant fleets offer to trade · Starts with Barter I + Teleporter' },
+    { id: 'smugglers', name: 'Smugglers', color: '#aa44ff', startingShip: 'Blockade Runner', startingBounty: 0,    desc: 'Operators in unofficial channels.',  startingPerk: 'engineering_1', startingItem: 'flash_grenade', effects: 'Starts with Engineering I + Flash Grenade' },
 ];
 
 /**
@@ -93,20 +93,48 @@ const GameController = {
         const container = document.getElementById('factionCards');
         if (!container) return;
         this._selectedFaction = 'police';
+        this._selectedBonusPerk = null;
 
-        container.innerHTML = PLAYER_FACTIONS.map(f => {
-            const disabled = f.id === 'smugglers';
-            return `<div class="faction-card" data-faction-id="${f.id}" data-faction-color="${f.color}"
-                    style="border:2px solid #333;border-radius:4px;padding:0.75em;background:#0a0a0a;
-                           cursor:${disabled ? 'not-allowed' : 'pointer'};opacity:${disabled ? '0.35' : '1'};">
-                <div style="color:${disabled ? '#555' : f.color};font-weight:bold;margin-bottom:0.1em;">${f.name}
+        const updateBonusPerkPicker = (factionId) => {
+            const faction = PLAYER_FACTIONS.find(f => f.id === factionId);
+            const startingPerk = faction ? faction.startingPerk : null;
+            const eligible = (CONSTANTS.PERKS || []).filter(p =>
+                p.id !== startingPerk &&
+                (!p.requires || p.requires === startingPerk)
+            );
+            // Keep current selection if still valid, otherwise pick first
+            if (!eligible.find(p => p.id === this._selectedBonusPerk)) {
+                this._selectedBonusPerk = eligible.length > 0 ? eligible[0].id : null;
+            }
+            const picker = document.getElementById('bonusPerkPicker');
+            if (!picker) return;
+            picker.innerHTML = eligible.map(p => {
+                const sel = this._selectedBonusPerk === p.id;
+                return `<div class="perk-pick-card" data-perk-id="${p.id}"
+                    style="border:2px solid ${sel ? '#aaff44' : '#333'};border-radius:4px;padding:0.5em 0.65em;
+                           background:${sel ? '#0d1800' : '#0a0a0a'};cursor:pointer;">
+                    <div style="color:${sel ? '#aaff44' : '#eee'};font-weight:bold;font-size:0.88em;">${p.name}</div>
+                    <div style="color:#555;font-size:0.7em;line-height:1.4;margin-top:0.15em;">${p.desc}</div>
+                </div>`;
+            }).join('');
+            picker.querySelectorAll('.perk-pick-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    this._selectedBonusPerk = card.dataset.perkId;
+                    updateBonusPerkPicker(factionId);
+                });
+            });
+        };
+
+        container.innerHTML = PLAYER_FACTIONS.map(f => `
+            <div class="faction-card" data-faction-id="${f.id}" data-faction-color="${f.color}"
+                style="border:2px solid #333;border-radius:4px;padding:0.75em;background:#0a0a0a;cursor:pointer;">
+                <div style="color:${f.color};font-weight:bold;margin-bottom:0.1em;">${f.name}
                     <span style="color:#555;font-weight:normal;font-size:0.78em;">— ${f.startingShip}</span>
                 </div>
                 <div style="color:#666;font-size:0.72em;line-height:1.45;margin-top:0.2em;">${f.effects}</div>
-            </div>`;
-        }).join('');
+            </div>`).join('');
 
-        container.querySelectorAll('.faction-card:not([style*="not-allowed"])').forEach(card => {
+        container.querySelectorAll('.faction-card').forEach(card => {
             card.addEventListener('click', () => {
                 container.querySelectorAll('.faction-card').forEach(c => {
                     c.style.borderColor = '#333';
@@ -115,10 +143,11 @@ const GameController = {
                 card.style.borderColor = card.dataset.factionColor;
                 card.style.background = '#111';
                 this._selectedFaction = card.dataset.factionId;
+                updateBonusPerkPicker(card.dataset.factionId);
             });
         });
 
-        const firstCard = container.querySelector('.faction-card:not([style*="not-allowed"])');
+        const firstCard = container.querySelector('.faction-card');
         if (firstCard) firstCard.click();
 
         document.getElementById('commanderNameInput').value = '';
@@ -145,6 +174,15 @@ const GameController = {
         }
         startingShip._buyPrice = CONSTANTS.NEW_SHIP_BASE_COST;
         gameState.playerShips  = [startingShip];
+        if (factionData && factionData.startingPerk) {
+            gameState.perks = [factionData.startingPerk];
+        }
+        if (this._selectedBonusPerk && !gameState.perks.includes(this._selectedBonusPerk)) {
+            gameState.perks.push(this._selectedBonusPerk);
+        }
+        if (factionData && factionData.startingItem) {
+            startingShip.inventory = [factionData.startingItem];
+        }
         assignFleetNames(gameState.playerShips);
         gameState.selectedShip = startingShip;
 
@@ -482,6 +520,87 @@ const GameController = {
                 closeModal();
                 startCombatWith(false, { enemyFirst: true }, encounter.isQueenFight ? 0 : 3);
             };
+            modalEl.style.display = 'flex';
+            return;
+        }
+
+        // ── MERCHANT PLAYER meets MERCHANT FLEET — always offer to trade ────────
+        if (gameState.playerFaction === 'merchants' && encounter.faction === 'merchants') {
+            const items = CONSTANTS.ITEMS || [];
+            const randomItem = items.length > 0 ? items[Math.floor(Math.random() * items.length)] : null;
+
+            const availableShipTypes = (CONSTANTS.SHIP_TYPES || []).filter(t => !t.internal);
+            const randomTypeData = availableShipTypes[Math.floor(Math.random() * availableShipTypes.length)];
+            const S = CONSTANTS.SHIP_STATS;
+            const offerShipStats = {
+                hull:    Math.max(1, Math.round((S.HULL_MIN + S.HULL_MAX) / 2 * randomTypeData.hullMult)),
+                shields: Math.max(0, Math.round((S.SHIELDS_MIN + S.SHIELDS_MAX) / 2 * randomTypeData.shieldMult)),
+                laser:   Math.max(1, Math.round((S.LASER_MIN + S.LASER_MAX) / 2 * randomTypeData.laserMult)),
+                radar:   Math.max(1, Math.round((S.RADAR_MIN + S.RADAR_MAX) / 2 * randomTypeData.radarMult)),
+                engine:  Math.max(5, Math.round((S.ENGINE_MIN + S.ENGINE_MAX) / 2 * randomTypeData.engineMult)),
+                type:    randomTypeData.type,
+            };
+            const discountMult = barterPriceMult(gameState.perks || []);
+            const itemCost  = randomItem ? Math.max(1, Math.floor(randomItem.cost * discountMult)) : 0;
+            const shipCost  = Math.max(1, Math.floor(calcShipCost(offerShipStats) * discountMult));
+            const fleetFull = gameState.playerShips.filter(s => s.alive).length >= maxFleetSize(gameState);
+
+            titleEl.textContent = 'Merchant Convoy';
+            titleEl.style.color = '#ffcc44';
+            titleEl.removeAttribute('data-tooltip-title');
+            titleEl.removeAttribute('data-tooltip-body');
+            titleEl.style.cursor = '';
+
+            const itemHtml = randomItem ? `
+                <div style="margin:0.4em 0;padding:0.4em 0.5em;background:#0d0d0d;border:1px solid #333;border-radius:3px;display:flex;justify-content:space-between;align-items:center;gap:0.5em;">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:bold;color:#eee;">${randomItem.name}</div>
+                        <div style="font-size:0.8em;color:#888;">${randomItem.desc}</div>
+                    </div>
+                    <button class="btn-primary btn-sm" id="merchantBuyItem" ${gameState.credits < itemCost ? 'disabled' : ''}>${itemCost} cr</button>
+                </div>` : '';
+
+            const shipFleetNote = fleetFull ? `<div style="font-size:0.78em;color:#ff8844;margin-top:0.15em;">Fleet at capacity</div>` : '';
+            const shipHtml = `
+                <div style="margin:0.4em 0;padding:0.4em 0.5em;background:#0d0d0d;border:1px solid #333;border-radius:3px;display:flex;justify-content:space-between;align-items:center;gap:0.5em;">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:bold;color:#eee;">${offerShipStats.type}</div>
+                        <div style="font-size:0.8em;color:#888;">Hull ${offerShipStats.hull} · Shields ${offerShipStats.shields} · Laser ${offerShipStats.laser} · Radar ${offerShipStats.radar} · Engine ${offerShipStats.engine}</div>
+                        ${shipFleetNote}
+                    </div>
+                    <button class="btn-primary btn-sm" id="merchantBuyShip" ${(gameState.credits < shipCost || fleetFull) ? 'disabled' : ''}>${shipCost} cr</button>
+                </div>`;
+
+            bodyEl.innerHTML = `<p style="color:#aaa;margin-bottom:0.3em;">A merchant convoy of <strong>${encounter.size} ships</strong> offers to trade.</p>${itemHtml}${shipHtml}`;
+            engageBtn.style.display = 'none';
+            retreatBtn.textContent = 'Pass';
+            retreatBtn.style.display = '';
+            retreatBtn.onclick = () => { closeModal(); onContinue(); };
+
+            if (randomItem) {
+                const itemBtn = document.getElementById('merchantBuyItem');
+                if (itemBtn) itemBtn.addEventListener('click', () => {
+                    if (gameState.credits < itemCost) return;
+                    gameState.credits -= itemCost;
+                    const ship = gameState.playerShips.find(s => s.alive && (s.inventory || []).length < (s.cargoCapacity || 1));
+                    if (ship) ship.inventory.push(randomItem.id);
+                    closeModal(); onContinue();
+                });
+            }
+
+            const shipBtn = document.getElementById('merchantBuyShip');
+            if (shipBtn) shipBtn.addEventListener('click', () => {
+                const aliveNow = gameState.playerShips.filter(s => s.alive).length;
+                if (gameState.credits < shipCost || aliveNow >= maxFleetSize(gameState)) return;
+                gameState.credits -= shipCost;
+                const newShip = SpaceTravel.generateShipOfType(offerShipStats.type);
+                newShip.isPlayer = true;
+                newShip._buyPrice = shipCost;
+                gameState.playerShips.push(newShip);
+                assignFleetNames(gameState.playerShips);
+                closeModal(); onContinue();
+            });
+
             modalEl.style.display = 'flex';
             return;
         }
@@ -1105,8 +1224,10 @@ const GameController = {
                     : '';
             } else {
                 const creditMult = factionData ? (factionData.creditMult || 1) : 1;
-                const displayRewards = Math.round(rewards * creditMult);
-                const creditNote = creditMult > 1 ? ' — wealthy convoy' : creditMult < 1 ? ' — few valuables' : ` (${enemyDestroyed} × ${CONSTANTS.CREDITS_PER_ENEMY_DESTROYED} cr per kill)`;
+                const salvMult = salvagingCreditMult(gameState.perks || []);
+                const displayRewards = Math.round(rewards * creditMult * salvMult);
+                let creditNote = creditMult > 1 ? ' — wealthy convoy' : creditMult < 1 ? ' — few valuables' : ` (${enemyDestroyed} × ${CONSTANTS.CREDITS_PER_ENEMY_DESTROYED} cr per kill)`;
+                if (salvMult > 1) creditNote += `, +${Math.round((salvMult - 1) * 100)}% salvaging`;
                 rewardLine = displayRewards > 0
                     ? `<p style="color:#ffdd44;margin-top:0.5em;">+${displayRewards} credits${creditNote}</p>`
                     : '';
@@ -1142,9 +1263,13 @@ const GameController = {
         gameState.playerShips = [...combat.playerShips, ...combat.fleedPlayerShips];
         gameState.enemyShips = combat.enemyShips;
 
-        // Restore hull and shields to max for alive ships between encounters
+        // Shields fully restore; hull repaired by Engineering perk fraction (no full auto-restore)
+        const repairFrac = engineeringRepairFraction(gameState.perks || []);
         gameState.playerShips.forEach(s => {
-            if (s.alive) { s.hull = s.maxHull; s.shields = s.maxShields; }
+            if (s.alive) {
+                s.shields = s.maxShields;
+                s.hull = Math.min(s.hull + Math.round(s.maxHull * repairFrac), s.maxHull);
+            }
         });
 
         cancelAnimationFrame(animationFrameId);
@@ -1175,11 +1300,13 @@ const GameController = {
                     gameState.contracts = (gameState.contracts || 0) + enemyDestroyed * 250;
                 } else {
                     const creditMult = factionDataEC ? (factionDataEC.creditMult || 1) : 1;
-                    gameState.credits += Math.round(rewards * creditMult);
+                    const salvMult = salvagingCreditMult(gameState.perks || []);
+                    gameState.credits += Math.round(rewards * creditMult * salvMult);
                 }
                 _defeatedEncounterInfo = null;
             } else {
-                gameState.credits += rewards;
+                const salvMult = salvagingCreditMult(gameState.perks || []);
+                gameState.credits += Math.round(rewards * salvMult);
             }
             // Return to galaxy map; if mid-travel, resume the journey
             gameState.state = GAME_STATE.GALAXY;

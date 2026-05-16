@@ -244,35 +244,81 @@ class UISystem {
             ? `<div style="color:#ffdd44;font-weight:bold;margin-bottom:0.75em;">Unspent Perk Points: ${availablePoints}</div>`
             : `<div style="color:#666;margin-bottom:0.75em;">No perk points available — earn more EXP in combat.</div>`;
 
-        const perkRows = (CONSTANTS.PERKS || []).map(perk => {
-            const owned = perks.includes(perk.id);
-            const prereqMet = !perk.requires || perks.includes(perk.requires);
-            const canBuy = !owned && prereqMet && availablePoints > 0;
-            const statusLabel = owned
-                ? `<span style="color:#00ff88;font-weight:bold;">Unlocked</span>`
-                : (!prereqMet ? `<span style="color:#555;">Locked</span>` : '');
+        const perkCategories = [
+            {
+                key: 'Leadership',
+                title: 'Leadership',
+                desc: 'Expand your fleet capacity.',
+                effect: () => `Fleet capacity: ${maxFleetSize(gameState)} ships`,
+            },
+            {
+                key: 'Gunner',
+                title: 'Gunner',
+                desc: 'Reduce long-range miss chance for all your ships.',
+                effect: () => {
+                    const r = gunnerMissReduction(perks);
+                    return `Miss chance at max range: ${Math.round((0.5 - r) * 100)}%`;
+                },
+            },
+            {
+                key: 'Barter',
+                title: 'Barter',
+                desc: 'Lower prices at stations and in trade encounters.',
+                effect: () => {
+                    const m = barterPriceMult(perks);
+                    return m < 1 ? `Station prices: ${Math.round(m * 100)}% (${Math.round((1 - m) * 100)}% off)` : 'No discount yet';
+                },
+            },
+            {
+                key: 'Salvaging',
+                title: 'Salvaging',
+                desc: 'Earn more credits from combat victories.',
+                effect: () => {
+                    const m = salvagingCreditMult(perks);
+                    return `Combat credit bonus: +${Math.round((m - 1) * 100)}%`;
+                },
+            },
+            {
+                key: 'Engineering',
+                title: 'Engineering',
+                desc: 'Repair hull damage after each combat.',
+                effect: () => {
+                    const f = engineeringRepairFraction(perks);
+                    return `Post-combat hull repair: ${Math.round(f * 100)}% of max hull`;
+                },
+            },
+        ];
 
-            return `<tr>
-                <td style="white-space:nowrap;color:${owned ? '#00ff88' : prereqMet ? '#eee' : '#666'};">${perk.name}</td>
-                <td style="color:#aaa;font-size:0.9em;">${perk.desc}</td>
-                <td style="text-align:center;">${perk.fleetSize} ships</td>
-                <td style="text-align:right;">${statusLabel}</td>
-                <td>${canBuy ? `<button class="btn-primary btn-sm" data-buy-perk="${perk.id}">Unlock (1 pt)</button>` : ''}</td>
-            </tr>`;
-        }).join('');
+        const renderPerkCategory = (cat) => {
+            const catPerks = (CONSTANTS.PERKS || []).filter(p => p.category === cat.key);
+            const rows = catPerks.map(perk => {
+                const owned = perks.includes(perk.id);
+                const prereqMet = !perk.requires || perks.includes(perk.requires);
+                const canBuy = !owned && prereqMet && availablePoints > 0;
+                const statusLabel = owned
+                    ? `<span style="color:#00ff88;font-weight:bold;">✓</span>`
+                    : (!prereqMet ? `<span style="color:#444;">Locked</span>` : '');
+                return `<tr>
+                    <td style="white-space:nowrap;color:${owned ? '#00ff88' : prereqMet ? '#eee' : '#555'};">${perk.name}</td>
+                    <td style="color:#aaa;font-size:0.88em;">${perk.desc}</td>
+                    <td style="text-align:right;white-space:nowrap;">${statusLabel}</td>
+                    <td style="text-align:right;">${canBuy ? `<button class="btn-primary btn-sm" data-buy-perk="${perk.id}">Unlock (1 pt)</button>` : ''}</td>
+                </tr>`;
+            }).join('');
+            return `
+                <div class="header-3" style="margin-bottom:0.2em;margin-top:0.8em;">${cat.title}</div>
+                <p style="color:#888;font-size:0.82em;margin:0 0 0.35em;">${cat.desc} <span style="color:#aabb88;">${cat.effect()}</span></p>
+                <table class="ship-status-table" style="width:100%;margin-bottom:0.1em;">
+                    <thead><tr><th>Perk</th><th>Description</th><th></th><th></th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
+        };
 
         document.getElementById('perksContent').innerHTML = `
             <div class="station-section">
                 ${expBarHtml}
                 ${pointsHtml}
-                <div class="header-3" style="margin-bottom:0.4em;">Leadership Perks</div>
-                <p style="color:#aaa;font-size:0.88em;margin-bottom:0.5em;">
-                    Each leadership perk costs 1 perk point and expands your maximum fleet size by 1.
-                </p>
-                <table class="ship-status-table" style="width:100%;">
-                    <thead><tr><th>Perk</th><th>Description</th><th>Fleet Size</th><th>Status</th><th></th></tr></thead>
-                    <tbody>${perkRows}</tbody>
-                </table>
+                ${perkCategories.map(renderPerkCategory).join('')}
             </div>`;
 
         document.querySelectorAll('[data-buy-perk]').forEach(btn => {

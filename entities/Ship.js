@@ -246,7 +246,8 @@ class Ship {
         let hitChance = 1;
         if (!alwaysHit && maxRange !== undefined && maxRange > 0) {
             const dist = distance(this.x, this.y, targetShip.x, targetShip.y);
-            hitChance = 1 - (Math.min(1, dist / maxRange) * 0.5);
+            const baseMissChance = Math.max(0, 0.5 - (this._gunnerMissReduction || 0));
+            hitChance = 1 - (Math.min(1, dist / maxRange) * baseMissChance);
         }
 
         const isHit = alwaysHit || Math.random() < hitChance;

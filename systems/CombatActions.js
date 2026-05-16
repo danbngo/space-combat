@@ -1723,6 +1723,19 @@ Combat.prototype.playerUseItem = function(ship, itemId) {
             ship.hull = ship.maxHull;
             this.addFloatingText('Nanites!', '#00ff88', ship.x, ship.y - 12);
             this.addLog(`${this._shipLabel(ship)}: nanite canister — hull fully restored!`);
+        } else if (itemId === 'flash_grenade') {
+            ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+            const enemies = ship.isPlayer ? this.enemyShips : this.playerShips;
+            let blinded = 0;
+            enemies.forEach(e => {
+                if (e.alive && !e.cloaked) {
+                    e.blindedTurns = (e.blindedTurns || 0) + 1;
+                    this.addFloatingText('Blinded!', '#ffffaa', e.x, e.y - 12);
+                    blinded++;
+                }
+            });
+            this.addFloatingText('Flash!', '#ffffaa', ship.x, ship.y - 16);
+            this.addLog(`${this._shipLabel(ship)}: flash grenade — ${blinded} enemy ship${blinded !== 1 ? 's' : ''} blinded!`);
         }
 
         this.checkAutoAdvance(ship);

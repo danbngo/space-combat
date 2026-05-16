@@ -95,9 +95,37 @@ function areShipsInContactTriangle(ship1, ship2) {
 // Returns the max fleet size for the player based on leadership perks.
 function maxFleetSize(gs) {
     const perks = gs.perks || [];
-    const leadership = ['leadership_1','leadership_2','leadership_3','leadership_4'];
+    const leadership = ['leadership_1','leadership_2','leadership_3','leadership_4','leadership_5'];
     const count = leadership.filter(id => perks.includes(id)).length;
-    return (CONSTANTS.DEFAULT_FLEET_SIZE || 2) + count;
+    return (CONSTANTS.DEFAULT_FLEET_SIZE || 1) + count;
+}
+
+// Returns the gunner miss-chance reduction (e.g. 0.10 for Gunner II = 10% less miss).
+function gunnerMissReduction(perks) {
+    const ranks = ['gunner_1','gunner_2','gunner_3','gunner_4','gunner_5']
+        .filter(id => (perks || []).includes(id)).length;
+    return ranks * 0.05;
+}
+
+// Returns the barter price multiplier (e.g. 0.8 for Barter II = 80% price).
+function barterPriceMult(perks) {
+    const ranks = ['barter_1','barter_2','barter_3','barter_4','barter_5']
+        .filter(id => (perks || []).includes(id)).length;
+    return Math.max(0.5, 1.0 - ranks * 0.1);
+}
+
+// Returns the salvaging credit bonus multiplier (e.g. 1.4 for Salvaging II).
+function salvagingCreditMult(perks) {
+    const ranks = ['salvaging_1','salvaging_2','salvaging_3','salvaging_4','salvaging_5']
+        .filter(id => (perks || []).includes(id)).length;
+    return 1 + ranks * 0.2;
+}
+
+// Returns the fraction of max hull repaired after combat (0–1).
+function engineeringRepairFraction(perks) {
+    const ranks = ['engineering_1','engineering_2','engineering_3','engineering_4','engineering_5']
+        .filter(id => (perks || []).includes(id)).length;
+    return Math.min(1.0, ranks * 0.2);
 }
 
 // Returns the commander's current level derived from total exp and EXP_THRESHOLDS.

@@ -2,7 +2,7 @@
 // Loaded after UI.js
 
 UISystem._stationDiscount = function(gameState) {
-    return gameState.playerFaction === 'merchants' ? 0.5 : 1.0;
+    return barterPriceMult(gameState.perks || []);
 };
 UISystem._discountedCost = function(cost, gameState) {
     return Math.max(1, Math.floor(cost * this._stationDiscount(gameState)));
@@ -96,7 +96,8 @@ UISystem.updateStationScreen = function(gameState) {
         const stationTitles = { shipyard: 'Shipyard', blackmarket: 'Black Market', mechanic: 'Mechanic Station', courthouse: 'Courthouse', marketplace: 'Marketplace' };
         const titleEl = document.getElementById('stationScreenTitle');
         const baseTitle = (sys && stationTitles[stationType]) || 'Space Station';
-        const discountSuffix = gameState.playerFaction === 'merchants' ? ' <span style="color:#ffcc44;font-size:0.7em;font-weight:normal;">50% off</span>' : '';
+        const discountMult = UISystem._stationDiscount(gameState);
+        const discountSuffix = discountMult < 1 ? ` <span style="color:#ffcc44;font-size:0.7em;font-weight:normal;">${Math.round((1 - discountMult) * 100)}% off</span>` : '';
         if (titleEl) titleEl.innerHTML = baseTitle + discountSuffix;
 
         const allTabIds = ['shipyardTab', 'modulesTab', 'mechanicTab', 'courthouseTab', 'marketplaceTab'];

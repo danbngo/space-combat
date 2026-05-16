@@ -37,6 +37,12 @@ class Combat {
         this.expGained = 0;
         this._expAwardedFor = new Set(); // ship objects already awarded exp
 
+        // Apply gunner perk to all player ships (reduces max-range miss chance)
+        if (typeof gameState !== 'undefined' && gameState) {
+            const reduction = gunnerMissReduction(gameState.perks || []);
+            if (reduction > 0) this.playerShips.forEach(s => { s._gunnerMissReduction = reduction; });
+        }
+
         this.initAsteroids();
         this.initClouds();
         this.initializeShipPositions(options.ambush);
