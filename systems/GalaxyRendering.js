@@ -646,16 +646,16 @@ class GalaxyRenderer {
         const isDirect = currentSystem && route.from.id === currentSystem.id;
 
         let html = `<strong>${route.from.name} → ${route.to.name}</strong>`;
-        if (routeData && isDirect) {
-            const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
-            const encLabel = routeData.maxEncounters === 1 ? '1 enc.' : `1–${routeData.maxEncounters} enc.`;
-            html += `<br>${tierLabel} · ${strLabel} threat · ${encLabel}`;
+        html += `<br>${tierLabel}`;
+        if (routeData) {
+            if (isDirect) {
+                const encLabel = routeData.maxEncounters === 1 ? '1 enc.' : `1–${routeData.maxEncounters} enc.`;
+                html += ` · ${encLabel}`;
+            }
             const hazards = [];
             if (routeData.hasAsteroids) hazards.push('Asteroids');
             if (routeData.cloudType) hazards.push(`${routeData.cloudType.charAt(0).toUpperCase() + routeData.cloudType.slice(1)} clouds`);
-            html += `<br>Hazards: ${hazards.length ? `<span style="color:#ffcc44;">${hazards.join(', ')}</span>` : '<span style="color:#666;">None</span>'}`;
-        } else {
-            html += `<br>${tierLabel}`;
+            if (hazards.length) html += `<br><span style="color:#ffcc44;">${hazards.join(', ')}</span>`;
         }
 
         tooltip.innerHTML = html;
@@ -989,6 +989,14 @@ class GalaxyRenderer {
         } else if (shape === 'square') {
             const h = r * 0.85;
             this.ctx.rect(x - h, y - h, h * 2, h * 2);
+        } else if (shape === 'star') {
+            const pts = 5, inner = r * 0.45;
+            for (let i = 0; i < pts * 2; i++) {
+                const ang = (i * Math.PI / pts) - Math.PI / 2;
+                const rr = i % 2 === 0 ? r : inner;
+                if (i === 0) this.ctx.moveTo(x + Math.cos(ang) * rr, y + Math.sin(ang) * rr);
+                else         this.ctx.lineTo(x + Math.cos(ang) * rr, y + Math.sin(ang) * rr);
+            }
         } else {
             this.ctx.arc(x, y, r, 0, Math.PI * 2);
         }
@@ -1019,8 +1027,8 @@ class GalaxyRenderer {
         }
 
         // Shape and base color by station type
-        const stationShape = { shipyard: 'circle', blackmarket: 'square', mechanic: 'diamond', courthouse: 'triangle' };
-        const stationBaseColor = { shipyard: '#e8c040', blackmarket: '#aa44ff', mechanic: '#44cc88', courthouse: '#4488ff' };
+        const stationShape = { shipyard: 'circle', blackmarket: 'square', mechanic: 'diamond', courthouse: 'triangle', marketplace: 'star' };
+        const stationBaseColor = { shipyard: '#ff9944', blackmarket: '#aa44ff', mechanic: '#44cc88', courthouse: '#4488ff', marketplace: '#e8c040' };
         const shape = system.isQueenPlanet ? 'circle' : (stationShape[system.stationType] || 'circle');
         const baseColor = system.isQueenPlanet ? '#ff4400' : (stationBaseColor[system.stationType] || '#808080');
 
@@ -1077,12 +1085,14 @@ class GalaxyRenderer {
                 blackmarket: '■ Black Market',
                 mechanic:    '◆ Mechanic',
                 courthouse:  '▲ Courthouse',
+                marketplace: '★ Marketplace',
             }[system.stationType] || '';
             const stationColor = {
-                shipyard:    '#e8c040',
+                shipyard:    '#ff9944',
                 blackmarket: '#aa44ff',
                 mechanic:    '#44cc88',
                 courthouse:  '#4488ff',
+                marketplace: '#e8c040',
             }[system.stationType] || '#aaa';
 
             let html = `<strong>${system.name}</strong><br>${tierLabel}`;
@@ -1342,8 +1352,6 @@ class GalaxyRenderer {
         const factionData = CONSTANTS.FACTIONS.find(f => f.id === fleet.faction);
         const factionName = factionData ? factionData.name : fleet.faction;
         const factionColor = factionData ? factionData.color : '#ffffff';
-        const threatLabel = fleet.fleetStrength <= 3 ? 'Low' : fleet.fleetStrength <= 6 ? 'Medium' : 'High';
-
         const routeData = routeKey && gameState && gameState.routes ? gameState.routes.get(routeKey) : null;
         const hazards = [];
         if (routeData) {
@@ -1352,8 +1360,8 @@ class GalaxyRenderer {
         }
 
         let html = `<strong style="color:${factionColor}">${factionName} Fleet</strong><br>`;
-        html += `${fleet.size} ships · ${fleet.leaderType}<br>`;
-        html += `Threat: ${threatLabel} (${fleet.fleetStrength}/10)`;
+        html += `${fleet.size} ships<br>`;
+        html += `Flagship: ${fleet.leaderType}`;
         if (fleet.isQueenFight) html += `<br><span style="color:#ff4400;">Alien Queen — Boss Fight</span>`;
         if (hazards.length > 0) html += `<br><span style="color:#ffcc44;">Hazards: ${hazards.join(', ')}</span>`;
 

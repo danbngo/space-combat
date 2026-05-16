@@ -1,5 +1,12 @@
 // Main Game File
 
+const PLAYER_FACTIONS = [
+    { id: 'police',    name: 'Police',    color: '#4488ff', startingShip: 'Interceptor',    startingBounty: 0,    desc: 'Law enforcement officers.',      effects: 'Cannot attack non-criminals · No bounty · 2× credits from pirate contracts' },
+    { id: 'pirates',   name: 'Pirates',   color: '#ff4444', startingShip: 'Raider',          startingBounty: 1000, desc: 'Outlaws who take what they want.', effects: 'Start with 1000 bounty · Cannot use courthouses · Enemy pirates are friendly' },
+    { id: 'merchants', name: 'Merchants', color: '#ffcc44', startingShip: 'Freighter',       startingBounty: 0,    desc: 'Shrewd traders and deal-makers.',   effects: 'All station purchases 50% cheaper' },
+    { id: 'smugglers', name: 'Smugglers', color: '#aa44ff', startingShip: 'Blockade Runner', startingBounty: 0,    desc: 'Operators in unofficial channels.',  effects: '(Coming soon)' },
+];
+
 /**
  * @typedef {{
  *   state: string,
@@ -65,7 +72,12 @@ const GameController = {
             credits: CONSTANTS.PLAYER_STARTING_CREDITS,
             bounty: 0,
             fame: 0,
+            contracts: 0,
             day: 1,
+            playerFaction: null,
+            playerName: 'Commander',
+            exp: 0,
+            perks: [],
             systems,
             routes,
             currentSystem: startingSystem,
@@ -74,19 +86,85 @@ const GameController = {
             playerShips: [],
             enemyShips: [],
         };
+        // Ships are created in beginNewGame() after faction selection
+    },
 
-        for (let i = 0; i < CONSTANTS.PLAYER_STARTING_SHIPS; i++) {
-            const s = new Ship(0, 0, true);
-            s._buyPrice = CONSTANTS.NEW_SHIP_BASE_COST;
-            gameState.playerShips.push(s);
+    showCharacterCreation: function() {
+        const container = document.getElementById('factionCards');
+        if (!container) return;
+        this._selectedFaction = 'police';
+
+        container.innerHTML = PLAYER_FACTIONS.map(f => {
+            const disabled = f.id === 'smugglers';
+            return `<div class="faction-card" data-faction-id="${f.id}" data-faction-color="${f.color}"
+                    style="border:2px solid #333;border-radius:4px;padding:0.75em;background:#0a0a0a;
+                           cursor:${disabled ? 'not-allowed' : 'pointer'};opacity:${disabled ? '0.35' : '1'};">
+                <div style="color:${disabled ? '#555' : f.color};font-weight:bold;margin-bottom:0.1em;">${f.name}
+                    <span style="color:#555;font-weight:normal;font-size:0.78em;">— ${f.startingShip}</span>
+                </div>
+                <div style="color:#666;font-size:0.72em;line-height:1.45;margin-top:0.2em;">${f.effects}</div>
+            </div>`;
+        }).join('');
+
+        container.querySelectorAll('.faction-card:not([style*="not-allowed"])').forEach(card => {
+            card.addEventListener('click', () => {
+                container.querySelectorAll('.faction-card').forEach(c => {
+                    c.style.borderColor = '#333';
+                    c.style.background = '#0a0a0a';
+                });
+                card.style.borderColor = card.dataset.factionColor;
+                card.style.background = '#111';
+                this._selectedFaction = card.dataset.factionId;
+            });
+        });
+
+        const firstCard = container.querySelector('.faction-card:not([style*="not-allowed"])');
+        if (firstCard) firstCard.click();
+
+        document.getElementById('commanderNameInput').value = '';
+        UISystem.showScreen('characterCreationScreen');
+        setTimeout(() => document.getElementById('commanderNameInput').focus(), 80);
+    },
+
+    beginNewGame: function(playerName, playerFaction) {
+        gameState.playerName    = (playerName || '').trim() || 'Commander';
+        gameState.playerFaction = playerFaction || 'merchants';
+
+        const factionData = PLAYER_FACTIONS.find(f => f.id === playerFaction);
+        if (factionData && factionData.startingBounty) {
+            gameState.bounty = factionData.startingBounty;
         }
+
+        const startShipType = factionData ? factionData.startingShip : null;
+        let startingShip;
+        if (startShipType) {
+            startingShip = SpaceTravel.generateShipOfType(startShipType);
+            startingShip.isPlayer = true;
+        } else {
+            startingShip = new Ship(0, 0, true);
+        }
+        startingShip._buyPrice = CONSTANTS.NEW_SHIP_BASE_COST;
+        gameState.playerShips  = [startingShip];
         assignFleetNames(gameState.playerShips);
+        gameState.selectedShip = startingShip;
+
+        this.startGame();
     },
 
     setupEventListeners: function() {
         // Title Screen
         document.getElementById('startButton').addEventListener('click', () => {
-            this.startGame();
+            this.showCharacterCreation();
+        });
+
+        // Character Creation
+        document.getElementById('beginGameButton').addEventListener('click', () => {
+            const name    = document.getElementById('commanderNameInput').value;
+            const faction = this._selectedFaction || 'merchants';
+            this.beginNewGame(name, faction);
+        });
+        document.getElementById('commanderNameInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('beginGameButton').click();
         });
         
         // Galaxy Map Zoom Controls
@@ -148,22 +226,22 @@ const GameController = {
         document.getElementById('courthouseTab').addEventListener('click', () => {
             UISystem.setStationTab('courthouse', gameState);
         });
+        document.getElementById('marketplaceTab').addEventListener('click', () => {
+            UISystem.setStationTab('marketplace', gameState);
+        });
         
         document.getElementById('leaveStationButton').addEventListener('click', () => {
             gameState.state = GAME_STATE.GALAXY;
             UISystem.showScreen('galaxyScreen');
             UISystem.updateGalaxyScreen(gameState);
         });
+
+        document.getElementById('closePerksButton').addEventListener('click', () => {
+            gameState.state = GAME_STATE.GALAXY;
+            UISystem.showScreen('galaxyScreen');
+            UISystem.updateGalaxyScreen(gameState);
+        });
         
-        // Combat Screen
-        document.getElementById('combatActionsTab').addEventListener('click', () => {
-            UISystem.combatTab = 'actions';
-            if (combat) UISystem.updateCombatScreen(gameState, combat);
-        });
-        document.getElementById('combatInfoTab').addEventListener('click', () => {
-            UISystem.combatTab = 'info';
-            if (combat) UISystem.updateCombatScreen(gameState, combat);
-        });
 
         document.getElementById('combatResultContinueBtn').addEventListener('click', () => {
             document.getElementById('combatResultModal').style.display = 'none';
@@ -200,6 +278,11 @@ const GameController = {
         UISystem.showScreen('galaxyScreen');
         if (galaxyRenderer) { galaxyRenderer.resizeCanvas(); galaxyRenderer.initializeZoom(); }
         UISystem.updateGalaxyScreen(gameState);
+    },
+
+    openPerksScreen: function() {
+        UISystem.showScreen('perksScreen');
+        UISystem.updatePerksScreen(gameState);
     },
     
     visitStation: function() {
@@ -277,6 +360,8 @@ const GameController = {
         const factionData = CONSTANTS.FACTIONS.find(f => f.id === encounter.faction);
         const factionName = factionData ? factionData.name : 'Unknown';
         const factionColor = factionData ? factionData.color : '#ffffff';
+        const isPirateFaction = gameState.playerFaction === 'pirates';
+        const isPoliceFaction = gameState.playerFaction === 'police';
 
         // Route hazard flags — threaded into every combat on this route
         const _routeData = routeKey && gameState.routes ? gameState.routes.get(routeKey) : null;
@@ -291,12 +376,12 @@ const GameController = {
             };
             const preGenFleetSoldier = SpaceTravel.generateEnemyFleet(encounter);
             const startCombatSoldier = (addBounty, combatOptions = {}, fameDelta = 0) => {
-                if (addBounty) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
+                if (addBounty && !isPoliceFaction) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
                 removeEncounterFn();
                 _defeatedEncounterInfo = { faction: encounter.faction, size: encounter.size, fameDelta, isQueenFight: false };
                 gameState.enemyShips = preGenFleetSoldier;
                 _travelContinuation = onContinue;
-                this.startCombat({ ..._hazardOpts, ...combatOptions });
+                this.startCombat({ ..._hazardOpts, ...combatOptions, encounterFaction: encounter.faction });
             };
             const removeEncounterFn = () => {};
             const modalEl2   = document.getElementById('encounterModal');
@@ -340,7 +425,7 @@ const GameController = {
         const undetected  = playerRadar > enemyRadar;
 
         const startCombatWith = (addBounty, combatOptions = {}, fameDelta = 0) => {
-            if (addBounty) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
+            if (addBounty && !isPoliceFaction) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
             _defeatedEncounterInfo = {
                 faction:      encounter.faction,
                 size:         encounter.size,
@@ -349,7 +434,7 @@ const GameController = {
             };
             gameState.enemyShips = preGenFleet;
             _travelContinuation = onContinue;
-            this.startCombat({ ..._hazardOpts, ...combatOptions });
+            this.startCombat({ ..._hazardOpts, ...combatOptions, encounterFaction: encounter.faction });
         };
 
         const modalEl    = document.getElementById('encounterModal');
@@ -358,6 +443,7 @@ const GameController = {
         const engageBtn  = document.getElementById('encounterEngageBtn');
         const retreatBtn = document.getElementById('encounterRetreatBtn');
 
+        engageBtn.style.display = '';
         const closeModal = () => {
             modalEl.style.display = 'none';
             retreatBtn.style.display = '';
@@ -412,7 +498,23 @@ const GameController = {
             if (encounter.faction === 'soldiers')  fleetDesc = `A soldier patrol of <strong>${encounter.size} ships</strong> ahead.`;
             if (encounter.faction === 'smugglers') fleetDesc = `A smuggler convoy of <strong>${encounter.size} ships</strong> ahead.`;
 
-            const isNeutral = encounter.faction === 'merchants' || encounter.faction === 'smugglers';
+            const isNeutral = encounter.faction === 'merchants';
+            // Police can't initiate against non-criminals (pirates + smugglers are criminals); pirates are friendly with other pirates
+            const policeBlock  = isPoliceFaction && encounter.faction !== 'pirates' && encounter.faction !== 'smugglers';
+            const pirateBlock  = isPirateFaction && encounter.faction === 'pirates';
+            if (policeBlock || pirateBlock) {
+                const noteColor = policeBlock ? '#4488ff' : '#ff8888';
+                const noteMsg   = policeBlock
+                    ? 'Your sworn duty prevents attacking non-criminal factions.'
+                    : 'They recognise your colours — you\'re one of them.';
+                bodyEl.innerHTML = `${detLine}<p>${fleetDesc}</p><p style="color:${noteColor};font-size:0.85em;margin-top:0.3em;">${noteMsg}</p>`;
+                engageBtn.style.display = 'none';
+                retreatBtn.textContent  = 'Pass';
+                retreatBtn.style.display = '';
+                retreatBtn.onclick = () => { closeModal(); onContinue(); };
+                modalEl.style.display = 'flex';
+                return;
+            }
 
             if (isNeutral) {
                 bodyEl.innerHTML = `${detLine}<p>${fleetDesc}</p>
@@ -422,19 +524,29 @@ const GameController = {
                     <p style="color:#aaa;font-size:0.82em;margin-top:0.3em;">Each option has a <strong>50%</strong> chance of success.</p>`;
             }
 
+            engageBtn.style.display = '';
             engageBtn.textContent = 'Ambush';
             retreatBtn.textContent = isNeutral ? 'Ignore' : 'Sneak Around';
             retreatBtn.style.display = '';
 
             engageBtn.onclick = () => {
-                closeModal();
                 const fameDelta = computeFameDelta(encounter.faction, true);
-                if (Math.random() < 0.5) {
-                    // Ambush success: enemy 0 shields, faces away, player first
-                    startCombatWith(false, { ambush: true, enemyFirst: false }, fameDelta);
+                const ambushSuccess = Math.random() < 0.5;
+                retreatBtn.style.display = 'none';
+                if (ambushSuccess) {
+                    titleEl.textContent = 'Ambush Successful!';
+                    titleEl.style.color = '#00ff88';
+                    bodyEl.innerHTML = `<p style="color:#00ff88;"><strong>✓ Ambush successful!</strong></p>
+                        <p style="color:#aaa;font-size:0.88em;">Enemy caught off-guard — shields down, facing away.</p>`;
+                    engageBtn.textContent = 'Continue';
+                    engageBtn.onclick = () => { closeModal(); startCombatWith(false, { ambush: true, enemyFirst: false }, fameDelta); };
                 } else {
-                    // Ambush failed: they spotted you, enemy first — player still initiated
-                    startCombatWith(false, { enemyFirst: true }, fameDelta);
+                    titleEl.textContent = 'Ambush Failed!';
+                    titleEl.style.color = '#ff4444';
+                    bodyEl.innerHTML = `<p style="color:#ff4444;"><strong>✗ Ambush failed!</strong></p>
+                        <p style="color:#aaa;font-size:0.88em;">They spotted you first — prepare for their assault!</p>`;
+                    engageBtn.textContent = 'Fight';
+                    engageBtn.onclick = () => { closeModal(); startCombatWith(false, { enemyFirst: true }, fameDelta); };
                 }
             };
 
@@ -467,7 +579,7 @@ const GameController = {
             const playerFame   = gameState.fame   || 0;
             let willAttack = false;
             if (encounter.faction === 'pirates') {
-                willAttack = Math.random() < 0.5;
+                willAttack = isPirateFaction ? false : Math.random() < 0.5;
             } else if (encounter.faction === 'police' && playerBounty > 0) {
                 willAttack = Math.random() < 0.5;
             } else if (encounter.faction === 'soldiers' && playerFame < 0) {
@@ -487,6 +599,7 @@ const GameController = {
                     const toll = Math.floor(gameState.credits * (0.25 + Math.random() * 0.5));
                     bodyEl.innerHTML = `${detLine}<p>${msg}</p>
                         <p style="color:#ffdd44;font-size:0.85em;margin-top:0.4em;">They'll let you pass if you hand over <strong>${toll} credits</strong>.</p>`;
+                    engageBtn.style.display = '';
                     engageBtn.textContent = 'Fight';
                     retreatBtn.textContent = `Surrender (−${toll} cr)`;
                     retreatBtn.style.display = '';
@@ -530,7 +643,25 @@ const GameController = {
                     attackLabel = `Attack (+1 fame)`;
                 }
 
+                // Police can't attack non-criminals (pirates + smugglers are criminals); pirates are friendly with other pirates
+                const blockAttack = (isPoliceFaction && encounter.faction !== 'pirates' && encounter.faction !== 'smugglers')
+                                 || (isPirateFaction && encounter.faction === 'pirates');
+                if (blockAttack) {
+                    const noteColor = isPoliceFaction ? '#4488ff' : '#ff8888';
+                    const noteMsg   = isPoliceFaction
+                        ? 'Your sworn duty prevents attacking non-criminal factions.'
+                        : 'They recognise your colours — you\'re one of them.';
+                    bodyEl.innerHTML = `${detLine}<p>${msg}</p><p style="color:${noteColor};font-size:0.85em;margin-top:0.3em;">${noteMsg}</p>`;
+                    engageBtn.style.display = 'none';
+                    retreatBtn.textContent = 'Pass';
+                    retreatBtn.style.display = '';
+                    retreatBtn.onclick = () => { closeModal(); onContinue(); };
+                    modalEl.style.display = 'flex';
+                    return;
+                }
+
                 bodyEl.innerHTML = `${detLine}<p>${msg}</p>`;
+                engageBtn.style.display = '';
                 engageBtn.textContent = attackLabel;
                 retreatBtn.textContent = 'Pass';
                 retreatBtn.style.display = '';
@@ -559,7 +690,6 @@ const GameController = {
             options
         );
 
-        UISystem.combatTab = 'actions';
         UISystem.showScreen('combatScreen');
 
         // Size canvas to its wrapper, then fit the arena into view
@@ -965,11 +1095,27 @@ const GameController = {
 
         const faction = _defeatedEncounterInfo ? _defeatedEncounterInfo.faction : null;
         const factionData = faction ? CONSTANTS.FACTIONS.find(f => f.id === faction) : null;
-        const creditMult = factionData ? (factionData.creditMult || 1) : 1;
-        const displayRewards = Math.round(rewards * creditMult);
-        const creditNote = creditMult > 1 ? ' — wealthy convoy' : creditMult < 1 ? ' — few valuables' : ` (${enemyDestroyed} × ${CONSTANTS.CREDITS_PER_ENEMY_DESTROYED} cr per kill)`;
-        const creditsLine = displayRewards > 0
-            ? `<p style="color:#ffdd44;margin-top:0.5em;">+${displayRewards} credits${creditNote}</p>`
+        const isPirates = faction === 'pirates';
+        let rewardLine = '';
+        if (combat.won && !combat.playerRetreated) {
+            if (isPirates) {
+                const contractsEarned = enemyDestroyed * 250;
+                rewardLine = contractsEarned > 0
+                    ? `<p style="color:#44ffdd;margin-top:0.5em;">+${contractsEarned} contracts (${enemyDestroyed} × 250 — collect at courthouse)</p>`
+                    : '';
+            } else {
+                const creditMult = factionData ? (factionData.creditMult || 1) : 1;
+                const displayRewards = Math.round(rewards * creditMult);
+                const creditNote = creditMult > 1 ? ' — wealthy convoy' : creditMult < 1 ? ' — few valuables' : ` (${enemyDestroyed} × ${CONSTANTS.CREDITS_PER_ENEMY_DESTROYED} cr per kill)`;
+                rewardLine = displayRewards > 0
+                    ? `<p style="color:#ffdd44;margin-top:0.5em;">+${displayRewards} credits${creditNote}</p>`
+                    : '';
+            }
+        }
+
+        const expGained  = combat ? (combat.expGained || 0) : 0;
+        const expLine = expGained > 0
+            ? `<p style="color:#aaff44;margin-top:0.5em;">+${expGained} EXP earned this battle</p>`
             : '';
 
         bodyEl.innerHTML = `
@@ -983,7 +1129,8 @@ const GameController = {
                 <div style="font-size:0.78em;color:#aaa;margin-bottom:0.3em;">${enemySummaryParts.join(' · ')}</div>
                 ${UISystem.renderShipTable(allEnemyShips, { bars: true })}
             </div>
-            ${creditsLine}`;
+            ${rewardLine}
+            ${expLine}`;
 
         document.getElementById('combatResultModal').style.display = 'flex';
     },
@@ -1022,8 +1169,14 @@ const GameController = {
                 }
 
                 const factionDataEC = CONSTANTS.FACTIONS.find(f => f.id === _defeatedEncounterInfo.faction);
-                const creditMult = factionDataEC ? (factionDataEC.creditMult || 1) : 1;
-                gameState.credits += Math.round(rewards * creditMult);
+                if (_defeatedEncounterInfo.faction === 'pirates') {
+                    const isTemp = s => s.isBomb || s.isTorpedo || s.isSwarmlet || s.isDrone || s.isMirror;
+                    const enemyDestroyed = [...combat.enemyShips, ...combat.fleedEnemyShips].filter(s => !isTemp(s) && !s.alive).length;
+                    gameState.contracts = (gameState.contracts || 0) + enemyDestroyed * 250;
+                } else {
+                    const creditMult = factionDataEC ? (factionDataEC.creditMult || 1) : 1;
+                    gameState.credits += Math.round(rewards * creditMult);
+                }
                 _defeatedEncounterInfo = null;
             } else {
                 gameState.credits += rewards;

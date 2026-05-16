@@ -16,6 +16,24 @@
         </div>
     </div>
 
+    <!-- Character Creation Screen -->
+    <div id="characterCreationScreen" class="screen">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;padding:2em;box-sizing:border-box;">
+            <div style="max-width:560px;width:100%;">
+                <div class="header-1" style="margin-bottom:0.8em;font-size:1.8em;">New Commander</div>
+                <div style="margin-bottom:1.2em;">
+                    <div style="color:#aaa;font-size:0.78em;text-transform:uppercase;letter-spacing:1px;margin-bottom:0.4em;">Commander Name</div>
+                    <input type="text" id="commanderNameInput" style="background:#111;border:1px solid #444;color:#eee;font-family:inherit;font-size:1em;padding:0.5em 0.75em;width:100%;box-sizing:border-box;border-radius:2px;outline:none;" placeholder="Enter your name..." maxlength="20" autocomplete="off">
+                </div>
+                <div style="margin-bottom:1.5em;">
+                    <div style="color:#aaa;font-size:0.78em;text-transform:uppercase;letter-spacing:1px;margin-bottom:0.55em;">Select Faction</div>
+                    <div id="factionCards" style="display:grid;grid-template-columns:1fr 1fr;gap:0.55em;"></div>
+                </div>
+                <button id="beginGameButton" class="btn-primary" style="width:100%;font-size:1.05em;padding:0.6em;">Begin</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Galaxy Map Screen -->
     <div id="galaxyScreen" class="screen">
         <div class="galaxy-container">
@@ -76,6 +94,7 @@
                             <div id="modulesTab" class="station-tab-button">Black Market</div>
                             <div id="mechanicTab" class="station-tab-button">Mechanic</div>
                             <div id="courthouseTab" class="station-tab-button">Courthouse</div>
+                            <div id="marketplaceTab" class="station-tab-button">Marketplace</div>
                             <div id="leaveStationButton" class="btn-secondary">Leave Station</div>
                         </div>
                         <div id="stationTabContent" class="station-tab-content"></div>
@@ -91,10 +110,6 @@
             <div class="combat-layout">
                 <div class="combat-sidebar-left">
                     <div class="combat-sidebar-menu">
-                        <div class="station-tabs">
-                            <div id="combatActionsTab" class="station-tab-button active">Actions</div>
-                            <div id="combatInfoTab" class="station-tab-button">Info</div>
-                        </div>
                         <div id="combatSidebarPanel" class="combat-tab-content"></div>
                         <div id="combatLogPanel" class="combat-log-panel"></div>
                     </div>
@@ -102,6 +117,7 @@
                 <div class="combat-main-column">
                     <div id="combatCanvasWrapper" class="combat-canvas-wrapper">
                         <canvas id="combatCanvas"></canvas>
+                        <div id="combatActionsOverlay" class="combat-actions-overlay"></div>
                         <div class="zoom-controls">
                             <div id="combatZoomInButton" class="btn-zoom">+</div>
                             <div id="combatZoomResetButton" class="btn-zoom">Reset</div>
@@ -229,6 +245,26 @@
         </div>
     </div>
 
+    <!-- Commander Perks Screen -->
+    <div id="perksScreen" class="screen">
+        <div class="station-container">
+            <div class="station-layout">
+                <div class="station-sidebar-left">
+                    <div id="perksPlayerPanel" class="system-info"></div>
+                </div>
+                <div class="station-main">
+                    <div class="station-menu">
+                        <div class="header-2">Commander Advancement</div>
+                        <div class="station-tabs">
+                            <div id="closePerksButton" class="btn-secondary">Back to Galaxy</div>
+                        </div>
+                        <div id="perksContent" class="station-tab-content"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <!-- Constants sub-files must load before constants/index.js assembles them -->
     <script src="constants/Enums.js"></script>
@@ -242,6 +278,7 @@
     <script src="constants/SpecialMoves.js"></script>
     <script src="constants/Station.js"></script>
     <script src="constants/AI.js"></script>
+    <script src="constants/Items.js"></script>
     <script src="constants/index.js"></script>
     <!-- Geometry primitives must load before any entity/system that uses them -->
     <script src="geometry/Shapes.js"></script>

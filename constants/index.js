@@ -11,4 +11,5 @@ const CONSTANTS = Object.assign(
     CONSTANTS_STATION,
     CONSTANTS_AI,
     CONSTANTS_DUST,
+    CONSTANTS_ITEMS,
 );

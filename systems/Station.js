@@ -3,7 +3,7 @@ class StationSystem {
 
     static buyNewShip(gameState, shipStats, cost) {
         const aliveCount = gameState.playerShips.filter(s => s.alive).length;
-        if (aliveCount >= CONSTANTS.PLAYER_STARTING_SHIPS) {
+        if (aliveCount >= maxFleetSize(gameState)) {
             alert('Fleet is at maximum capacity (alive ships).');
             return false;
         }

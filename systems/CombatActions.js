@@ -2,7 +2,7 @@
 // Loaded after Combat.js
 
 Combat.prototype.playerShootAt = function(shooter, target) {
-        if (shooter.statusEffect === 'plasma') {
+        if ((shooter.plasmaTurns || 0) > 0) {
             this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`);
             return;
         }
@@ -160,7 +160,7 @@ Combat.prototype._applyLaserHitToObstruction = function(shooter, obstruction, or
 };
 
 Combat.prototype.playerChaingun = function(shooter, target) {
-        if (shooter.statusEffect === 'plasma') { this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`); return; }
+        if ((shooter.plasmaTurns || 0) > 0) { this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`); return; }
         if (shooter.blindedTurns > 0)           { this.addLog(`${this._shipLabel(shooter)}: cannot fire — blinded!`);   return; }
         this._decloakDephase(shooter);
 
@@ -210,7 +210,7 @@ Combat.prototype.playerChaingun = function(shooter, target) {
 };
 
 Combat.prototype.playerPlasmaCannon = function(shooter, target) {
-        if (shooter.statusEffect === 'plasma') { this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`); return; }
+        if ((shooter.plasmaTurns || 0) > 0) { this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`); return; }
         if (shooter.blindedTurns > 0)           { this.addLog(`${this._shipLabel(shooter)}: cannot fire — blinded!`);   return; }
         this._decloakDephase(shooter);
 
@@ -884,6 +884,9 @@ Combat.prototype.playerNeutralize = function(ship, tx, ty) {
                 if ((target.frenzyTurns || 0) > 0)       { target.frenzyTurns = 0;       stripped.push('frenzy'); }
                 if ((target.timeslipTurns || 0) > 0)     { target.timeslipTurns = 0; target.timeslipData = null; stripped.push('timeslip'); }
                 if (target.cloaked)                       { target.decloak();             stripped.push('cloak'); }
+                if ((target.dustTurns   || 0) > 0)       { target.dustTurns   = 0;       stripped.push('dusty'); }
+                if ((target.iceTurns    || 0) > 0)       { target.iceTurns    = 0;       stripped.push('frozen'); }
+                if ((target.plasmaTurns || 0) > 0)       { target.plasmaTurns = 0;       stripped.push('overheated'); }
                 if (stripped.length > 0) {
                     self.addFloatingText('CLEANSED', '#ccff66', target.x, target.y - 6);
                     self.addLog(`${self._shipLabel(ship)} neutralized ${self._shipLabel(target)}: cleared ${stripped.join(', ')}`);
@@ -1331,7 +1334,7 @@ Combat.prototype.playerStasisField = function(ship, tx, ty) {
 
 Combat.prototype.playerRavager = function(shooter, target) {
         if (this._guardFrenzied(shooter)) return;
-        if (shooter.statusEffect === 'plasma') { this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`); return; }
+        if ((shooter.plasmaTurns || 0) > 0) { this.addLog(`${this._shipLabel(shooter)}: cannot fire — overheated!`); return; }
         if (shooter.blindedTurns > 0)           { this.addLog(`${this._shipLabel(shooter)}: cannot fire — blinded!`);   return; }
         this._decloakDephase(shooter);
 
@@ -1687,5 +1690,42 @@ Combat.prototype.performRam = function(rammer, target, moveDistance) {
         }, delay);
 
         this.checkAutoAdvance(rammer);
+};
+
+Combat.prototype.playerUseItem = function(ship, itemId) {
+        if (!ship || !ship.alive || ship.actionsRemaining <= 0) return;
+        const inv = ship.inventory || [];
+        const idx = inv.indexOf(itemId);
+        if (idx === -1) return;
+
+        inv.splice(idx, 1);
+
+        if (itemId === 'teleporter') {
+            ship.actionsRemaining = 0;
+            const angle = Math.atan2(ship.y - this.centerY, ship.x - this.centerX);
+            ship.targetX = this.centerX + Math.cos(angle) * (this.arenaRadius + 80);
+            ship.targetY = this.centerY + Math.sin(angle) * (this.arenaRadius + 80);
+            ship.targetRotation = angle;
+            ship.isMoving = true;
+            this.addAnimation({ type: 'blinkRing', x: ship.x, y: ship.y, duration: 400, totalDuration: 400 });
+            this.addFloatingText('Teleport!', '#88ffcc', ship.x, ship.y - 12);
+            this.addLog(`${this._shipLabel(ship)}: teleporter activated — escaping!`);
+        } else if (itemId === 'battery') {
+            ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+            ship.shields = ship.maxShields;
+            for (const key of Object.keys(ship.specialMoveCooldowns)) {
+                ship.specialMoveCooldowns[key] = 0;
+            }
+            this.addFloatingText('Battery!', '#00ccff', ship.x, ship.y - 12);
+            this.addLog(`${this._shipLabel(ship)}: battery — shields restored, cooldowns reset!`);
+        } else if (itemId === 'nanites') {
+            ship.actionsRemaining = Math.max(0, ship.actionsRemaining - 1);
+            ship.hull = ship.maxHull;
+            this.addFloatingText('Nanites!', '#00ff88', ship.x, ship.y - 12);
+            this.addLog(`${this._shipLabel(ship)}: nanite canister — hull fully restored!`);
+        }
+
+        this.checkAutoAdvance(ship);
+        UISystem.updateCombatScreen(gameState, this);
 };
 

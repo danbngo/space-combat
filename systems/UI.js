@@ -45,9 +45,9 @@ class UISystem {
     // Returns an HTML string of status-effect badges for a ship.
     static renderStatusEffects(ship) {
         const badges = [];
-        if (ship.statusEffect === 'dust')   badges.push('<span class="status-badge status-dusty" data-tooltip="Asteroid dust in engines — movement speed reduced.">Dusty</span>');
-        if (ship.statusEffect === 'ice')    badges.push('<span class="status-badge status-frozen" data-tooltip="Systems locked in ice — cannot move or act.">Frozen</span>');
-        if (ship.statusEffect === 'plasma') badges.push('<span class="status-badge status-overheated" data-tooltip="Plasma overload — cannot fire lasers.">Overheated</span>');
+        if ((ship.dustTurns   || 0) > 0) badges.push('<span class="status-badge status-dusty" data-tooltip="Asteroid dust — shots against this ship have an extra 50% miss chance.">Dusty</span>');
+        if ((ship.iceTurns    || 0) > 0) badges.push('<span class="status-badge status-frozen" data-tooltip="Ice cloud — movement speed halved, incoming non-laser damage halved.">Frozen</span>');
+        if ((ship.plasmaTurns || 0) > 0) badges.push('<span class="status-badge status-overheated" data-tooltip="Plasma cloud — cannot fire lasers; shield regen doubled on skip.">Overheated</span>');
         if ((ship.blindedTurns || 0) > 0)      badges.push(`<span class="status-badge status-blinded" data-tooltip="Flash-blinded — cannot fire for ${ship.blindedTurns} more turn${ship.blindedTurns !== 1 ? 's' : ''}.">Blinded (${ship.blindedTurns}t)</span>`);
         if ((ship.superchargedTurns || 0) > 0) badges.push(`<span class="status-badge" style="background:#aa8800;color:#ffe066;" data-tooltip="Supercharged — 2x move range, laser damage, and laser range for ${ship.superchargedTurns} more turn${ship.superchargedTurns !== 1 ? 's' : ''}.">Supercharged</span>`);
         if ((ship.berserkTurns || 0) > 0)      badges.push(`<span class="status-badge" style="background:#880088;color:#ff88ff;" data-tooltip="Hacked and berserk — randomly attacks any nearby ship for ${ship.berserkTurns} more turn${ship.berserkTurns !== 1 ? 's' : ''}.">Berserk (${ship.berserkTurns}t)</span>`);
@@ -69,14 +69,15 @@ class UISystem {
     //                        false: hull/shield show max value as plain text (for stat comparison)
     // options.isEnemy      — if true, rows get data-enemy-index instead of data-ship-index
     static renderShipTable(ships, options = {}) {
-        const { selectable = false, showStats = false, selectedShip = null, bars = true, isEnemy = false } = options;
+        const { selectable = false, showStats = false, selectedShip = null, activeShip = null, bars = true, isEnemy = false } = options;
 
         const extraHeaders = showStats ? '<th data-tooltip-title="Laser" data-tooltip-body="Base damage per shot. Scales laser range.">LZR</th><th data-tooltip-title="Engine" data-tooltip-body="Movement range per action and ram damage.">ENG</th><th data-tooltip-title="Radar" data-tooltip-body="Shot accuracy and maximum firing range.">RDR</th>' : '';
 
         const rows = ships.map((ship, i) => {
             const hullPct = ship.hull / ship.maxHull;
             const hullColor = hullPct > 0.5 ? '#00ffff' : hullPct > 0.25 ? '#ffff00' : '#ff3333';
-            const isSelected = selectedShip && ship === selectedShip;
+            const isSelected  = selectedShip && ship === selectedShip;
+            const isActive    = activeShip   && ship === activeShip;
             const isDead = !ship.alive;
             const isFled = ship.fled && ship.alive;
 
@@ -103,7 +104,7 @@ class UISystem {
                 <td style="text-align:center;">${ship.engine}</td>
                 <td style="text-align:center;">${ship.radar}</td>` : '';
 
-            const classes = ['ship-table-row', isSelected ? 'selected' : '', isDead ? 'destroyed' : '']
+            const classes = ['ship-table-row', isActive ? 'active-turn' : (isSelected ? 'selected' : ''), isDead ? 'destroyed' : '']
                 .filter(Boolean).join(' ');
             const indexAttr = isEnemy ? `data-enemy-index="${i}"` : (selectable ? `data-ship-index="${i}"` : '');
 
@@ -156,11 +157,50 @@ class UISystem {
         const fameColor = fame > 0 ? '#44ff88' : fame < 0 ? '#ff6644' : '#aaa';
         const fameSign = fame > 0 ? '+' : '';
         const fameHtml = `<p>Fame: <span style="color:${fameColor};font-weight:${fame !== 0 ? 'bold' : 'normal'};">${fameSign}${fame}</span></p>`;
+        const contracts = gameState.contracts || 0;
+        const contractsHtml = contracts > 0
+            ? `<p>Contracts: <span style="color:#44ffdd;font-weight:bold;">${contracts}</span></p>`
+            : '';
         const day = Math.round(gameState.day || 1);
+        const playerFactionData = gameState.playerFaction && typeof PLAYER_FACTIONS !== 'undefined'
+            ? PLAYER_FACTIONS.find(f => f.id === gameState.playerFaction) : null;
+        const factionHtml = playerFactionData
+            ? `<p>Faction: <span style="color:${playerFactionData.color};font-weight:bold;">${playerFactionData.name}</span></p>`
+            : '';
+        const nameHtml = gameState.playerName && gameState.playerName !== 'Commander'
+            ? `<p style="color:#ccc;">Cmdr ${gameState.playerName}</p>`
+            : '';
+
+        // Commander level / EXP bar
+        const exp   = gameState.exp || 0;
+        const level = commanderLevel(exp);
+        const prog  = expProgress(exp);
+        const expBarHtml = prog.needed !== null
+            ? (() => {
+                const pct = Math.min(100, (prog.current / prog.needed) * 100).toFixed(1);
+                return `<div style="margin:0.2em 0 0.1em;">
+                    <div style="font-size:0.8em;color:#aaff44;margin-bottom:2px;">Lv ${level} &nbsp;·&nbsp; ${prog.current}/${prog.needed} EXP</div>
+                    <div style="height:4px;background:#222;border-radius:2px;">
+                        <div style="width:${pct}%;height:100%;background:#aaff44;border-radius:2px;"></div>
+                    </div>
+                </div>`;
+              })()
+            : `<div style="font-size:0.8em;color:#aaff44;margin:0.2em 0;">Lv ${level} &nbsp;·&nbsp; Max Level</div>`;
+
+        const pendingPerkPoints = level - (gameState.perks || []).length;
+        const levelUpBtnHtml = pendingPerkPoints > 0
+            ? `<button id="openPerksBtn" class="btn-primary" style="width:100%;margin-top:0.3em;font-size:0.8em;padding:0.3em 0.6em;">Level Up! (${pendingPerkPoints} point${pendingPerkPoints > 1 ? 's' : ''} available)</button>`
+            : `<button id="openPerksBtn" class="btn-secondary" style="width:100%;margin-top:0.3em;font-size:0.8em;padding:0.3em 0.6em;">Commander Perks</button>`;
+
         return `<div class="header-3">Player Status</div>
+                ${nameHtml}
                 <p>Credits: ${gameState.credits} &nbsp;·&nbsp; <span style="color:#aaa;">Day ${day}</span></p>
+                ${factionHtml}
                 ${fameHtml}
                 ${bountyHtml}
+                ${contractsHtml}
+                ${expBarHtml}
+                ${levelUpBtnHtml}
                 ${this.renderShipTable(gameState.playerShips, tableOptions)}`;
     }
 
@@ -168,6 +208,89 @@ class UISystem {
         const el = document.getElementById('playerStatusPanel');
         if (!el) return;
         el.innerHTML = this.renderPlayerStatusHtml(gameState);
+        const btn = document.getElementById('openPerksBtn');
+        if (btn) btn.onclick = () => GameController.openPerksScreen();
+    }
+
+    static updatePerksScreen(gameState) {
+        // Sidebar
+        const sidebar = document.getElementById('perksPlayerPanel');
+        if (sidebar) sidebar.innerHTML = this.renderPlayerStatusHtml(gameState);
+        const sideBtn = sidebar ? sidebar.querySelector('#openPerksBtn') : null;
+        if (sideBtn) sideBtn.style.display = 'none';
+
+        const exp   = gameState.exp || 0;
+        const level = commanderLevel(exp);
+        const prog  = expProgress(exp);
+        const perks = gameState.perks || [];
+        const spentPoints = perks.length;
+        const availablePoints = level - spentPoints;
+
+        const expBarHtml = prog.needed !== null
+            ? (() => {
+                const pct = Math.min(100, (prog.current / prog.needed) * 100).toFixed(1);
+                return `<div style="margin-bottom:0.5em;">
+                    <div style="font-size:0.9em;color:#aaff44;margin-bottom:4px;">
+                        Commander Level ${level} &nbsp;·&nbsp; ${prog.current} / ${prog.needed} EXP to Level ${level + 1}
+                    </div>
+                    <div style="height:8px;background:#222;border-radius:4px;">
+                        <div style="width:${pct}%;height:100%;background:#aaff44;border-radius:4px;transition:width 0.3s;"></div>
+                    </div>
+                </div>`;
+              })()
+            : `<div style="color:#aaff44;margin-bottom:0.5em;">Commander Level ${level} — Maximum Level Reached</div>`;
+
+        const pointsHtml = availablePoints > 0
+            ? `<div style="color:#ffdd44;font-weight:bold;margin-bottom:0.75em;">Unspent Perk Points: ${availablePoints}</div>`
+            : `<div style="color:#666;margin-bottom:0.75em;">No perk points available — earn more EXP in combat.</div>`;
+
+        const perkRows = (CONSTANTS.PERKS || []).map(perk => {
+            const owned = perks.includes(perk.id);
+            const prereqMet = !perk.requires || perks.includes(perk.requires);
+            const canBuy = !owned && prereqMet && availablePoints > 0;
+            const statusLabel = owned
+                ? `<span style="color:#00ff88;font-weight:bold;">Unlocked</span>`
+                : (!prereqMet ? `<span style="color:#555;">Locked</span>` : '');
+
+            return `<tr>
+                <td style="white-space:nowrap;color:${owned ? '#00ff88' : prereqMet ? '#eee' : '#666'};">${perk.name}</td>
+                <td style="color:#aaa;font-size:0.9em;">${perk.desc}</td>
+                <td style="text-align:center;">${perk.fleetSize} ships</td>
+                <td style="text-align:right;">${statusLabel}</td>
+                <td>${canBuy ? `<button class="btn-primary btn-sm" data-buy-perk="${perk.id}">Unlock (1 pt)</button>` : ''}</td>
+            </tr>`;
+        }).join('');
+
+        document.getElementById('perksContent').innerHTML = `
+            <div class="station-section">
+                ${expBarHtml}
+                ${pointsHtml}
+                <div class="header-3" style="margin-bottom:0.4em;">Leadership Perks</div>
+                <p style="color:#aaa;font-size:0.88em;margin-bottom:0.5em;">
+                    Each leadership perk costs 1 perk point and expands your maximum fleet size by 1.
+                </p>
+                <table class="ship-status-table" style="width:100%;">
+                    <thead><tr><th>Perk</th><th>Description</th><th>Fleet Size</th><th>Status</th><th></th></tr></thead>
+                    <tbody>${perkRows}</tbody>
+                </table>
+            </div>`;
+
+        document.querySelectorAll('[data-buy-perk]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const perkId = btn.dataset.buyPerk;
+                const perkDef = (CONSTANTS.PERKS || []).find(p => p.id === perkId);
+                if (!perkDef) return;
+                const gs = gameState;
+                const level2 = commanderLevel(gs.exp || 0);
+                const spent  = (gs.perks || []).length;
+                if (level2 - spent <= 0) return;
+                const prereqOk = !perkDef.requires || (gs.perks || []).includes(perkDef.requires);
+                if (!prereqOk) return;
+                if ((gs.perks || []).includes(perkId)) return;
+                gs.perks = [...(gs.perks || []), perkId];
+                this.updatePerksScreen(gs);
+            });
+        });
     }
 
     static updateCurrentSystemSection(gameState) {
@@ -260,7 +383,7 @@ class UISystem {
                 const connected = gameState.systems.find(s => s.id === id);
                 return connected ? connected.name : null;
             }).filter(Boolean).join(', ') || 'None';
-            const stationLabel = { shipyard: 'Shipyard', blackmarket: 'Black Market', mechanic: 'Mechanic', courthouse: 'Courthouse' }[sys.stationType] || 'None';
+            const stationLabel = { shipyard: 'Shipyard', blackmarket: 'Black Market', mechanic: 'Mechanic', courthouse: 'Courthouse', marketplace: 'Marketplace' }[sys.stationType] || 'None';
             content.innerHTML = `
                 <div class="station-section">
                     <p><strong>Status:</strong> Visited</p>
@@ -493,13 +616,12 @@ class UISystem {
 
         const info = document.getElementById('selectedRouteInfo');
         if (info && routeData) {
-            const strLabel = routeData.fleetStrength <= 3 ? 'Low' : routeData.fleetStrength <= 6 ? 'Medium' : 'High';
             const tierLabel = route.to.isQueenPlanet ? 'Alien Queen\'s Lair' : `Tier ${route.to.tier}`;
             const hazards = [];
             if (routeData.hasAsteroids) hazards.push('Asteroids');
             if (routeData.cloudType) hazards.push(`${routeData.cloudType.charAt(0).toUpperCase() + routeData.cloudType.slice(1)} clouds`);
             const hazardLine = hazards.length ? `<span style="color:#ffcc44;">${hazards.join(', ')}</span>` : '<span style="color:#555;">None</span>';
-            info.innerHTML = `<p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">${tierLabel} · Threat: ${strLabel} (${routeData.fleetStrength}/10)</p>
+            info.innerHTML = `<p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">${tierLabel}</p>
                 <p style="color:#aaa;font-size:0.85em;margin:0.2em 0;">1–${routeData.maxEncounters} encounters</p>
                 <p style="font-size:0.85em;margin:0.3em 0 0;">Hazards: ${hazardLine}</p>`;
         } else if (info) {

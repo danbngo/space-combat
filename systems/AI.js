@@ -113,7 +113,7 @@ class AISystem {
 
     static decideAction(aiShip, playerShips, combat) {
         // Overheated: cannot use any abilities or shoot — just move
-        if (aiShip.statusEffect === 'plasma') {
+        if ((aiShip.plasmaTurns || 0) > 0) {
             const aliveTargets = playerShips.filter(s => s.alive && !s.cloaked);
             if (aliveTargets.length > 0) this.moveAction(aiShip, playerShips, combat);
             return;

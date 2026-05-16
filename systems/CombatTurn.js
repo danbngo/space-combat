@@ -150,6 +150,25 @@ Combat.prototype.addLog = function(msg) {
         this.combatLog.unshift(msg);
 };
 
+Combat.prototype.awardCombatExp = function(amount, ship) {
+        this.expGained = (this.expGained || 0) + amount;
+        if (typeof gameState !== 'undefined' && gameState) {
+            gameState.exp = (gameState.exp || 0) + amount;
+        }
+        this.addFloatingText(`+${amount} EXP`, '#aaff44', ship.x, ship.y - 28);
+};
+
+// Called every frame — detects newly dead enemy ships and awards exp once per ship.
+Combat.prototype._checkNewExpEvents = function() {
+        const isTemp = s => s.isBomb || s.isTorpedo || s.isSwarmlet || s.isDrone || s.isMirror;
+        for (const ship of [...this.enemyShips, ...this.fleedEnemyShips]) {
+            if (!ship.alive && !isTemp(ship) && !this._expAwardedFor.has(ship)) {
+                this._expAwardedFor.add(ship);
+                this.awardCombatExp(CONSTANTS.EXP_PER_ENEMY_DISABLED || 10, ship);
+            }
+        }
+};
+
 Combat.prototype.addFloatingText = function(text, color, worldX, worldY) {
         this.animations.push({
             type: 'floatingText',
@@ -178,6 +197,13 @@ Combat.prototype.updateAnimationTimers = function(deltaTime) {
 };
 
 Combat.prototype.endEnemyTurn = function() {
+        // Cloud effect expiry (0-persistence: set to 1 each frame while in cloud, decrement each round-end)
+        [...this.playerShips, ...this.enemyShips].forEach(ship => {
+            if ((ship.dustTurns   || 0) > 0) ship.dustTurns--;
+            if ((ship.iceTurns    || 0) > 0) ship.iceTurns--;
+            if ((ship.plasmaTurns || 0) > 0) ship.plasmaTurns--;
+        });
+
         // Drone lifetime countdown — just expire quietly (no explosion)
         [...this.playerShips, ...this.enemyShips].forEach(ship => {
             if (!ship.isDrone || !ship.alive) return;

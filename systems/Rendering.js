@@ -205,9 +205,9 @@ class RenderingSystem {
         if ((ship.berserkTurns || 0) > 0)      return '#ff44ff';
         if ((ship.superchargedTurns || 0) > 0) return '#ffee00';
         if ((ship.blindedTurns || 0) > 0)      return '#ffffff';
-        if (ship.statusEffect === 'dust')       return '#6688cc';
-        if (ship.statusEffect === 'ice')        return '#44ccff';
-        if (ship.statusEffect === 'plasma')     return '#ff8833';
+        if ((ship.dustTurns   || 0) > 0) return '#6688cc';
+        if ((ship.iceTurns    || 0) > 0) return '#44ccff';
+        if ((ship.plasmaTurns || 0) > 0) return '#ff8833';
         if (ship.cloaked && ship.isPlayer)      return '#aaffee';
         return null;
     }
@@ -217,9 +217,9 @@ class RenderingSystem {
         if ((ship.berserkTurns || 0) > 0)      return 'BSRK';
         if ((ship.superchargedTurns || 0) > 0) return 'SUPR';
         if ((ship.blindedTurns || 0) > 0)      return 'BLND';
-        if (ship.statusEffect === 'dust')       return 'DUST';
-        if (ship.statusEffect === 'ice')        return 'FRZN';
-        if (ship.statusEffect === 'plasma')     return 'HEAT';
+        if ((ship.dustTurns   || 0) > 0) return 'DUST';
+        if ((ship.iceTurns    || 0) > 0) return 'FRZN';
+        if ((ship.plasmaTurns || 0) > 0) return 'HEAT';
         if (ship.cloaked && ship.isPlayer)      return 'INVS';
         return null;
     }

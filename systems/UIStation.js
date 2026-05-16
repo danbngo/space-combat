@@ -1,6 +1,13 @@
 // UI station screen — extends UISystem
 // Loaded after UI.js
 
+UISystem._stationDiscount = function(gameState) {
+    return gameState.playerFaction === 'merchants' ? 0.5 : 1.0;
+};
+UISystem._discountedCost = function(cost, gameState) {
+    return Math.max(1, Math.floor(cost * this._stationDiscount(gameState)));
+};
+
 UISystem.openStationTab = function(tab, gameState) {
         gameState.state = GAME_STATE.STATION;
         gameState.selectedShip = gameState.selectedShip || gameState.playerShips[0] || null;
@@ -31,9 +38,13 @@ UISystem.updateStationScreen = function(gameState) {
         if (!this.currentStationOffer) {
             this.currentStationOffer = Array.from({ length: CONSTANTS.STATION_OFFER_COUNT }, () => {
                 const stats = UISystem.generateNewShipStats();
-                return { stats, cost: CONSTANTS.NEW_SHIP_BASE_COST + randomInt(-100, 100) };
+                return { stats, cost: calcShipCost(stats) };
             });
             this.selectedOfferIndex = 0;
+        }
+
+        if (!this.currentItemOffer) {
+            this.currentItemOffer = (CONSTANTS.ITEMS || []).slice();
         }
 
         if (!this.currentModuleOffer) {
@@ -49,7 +60,8 @@ UISystem.updateStationScreen = function(gameState) {
             }
         }
 
-        const offer = this.currentStationOffer[this.selectedOfferIndex];
+        const rawOffer = this.currentStationOffer[this.selectedOfferIndex];
+        const offer = rawOffer ? { ...rawOffer, cost: this._discountedCost(rawOffer.cost, gameState) } : rawOffer;
 
         const stationPanel = document.getElementById('stationPlayerPanel');
         if (stationPanel) {
@@ -57,6 +69,8 @@ UISystem.updateStationScreen = function(gameState) {
                 selectable: true,
                 selectedShip: currentShip
             });
+            const perksBtn = stationPanel.querySelector('#openPerksBtn');
+            if (perksBtn) perksBtn.onclick = () => GameController.openPerksScreen();
         }
 
         // Single-tab station: show only the tab matching the current system's stationType
@@ -68,20 +82,24 @@ UISystem.updateStationScreen = function(gameState) {
             blackmarket: 'modulesTab',
             mechanic:    'mechanicTab',
             courthouse:  'courthouseTab',
+            marketplace: 'marketplaceTab',
         };
         const activeTabId = tabIdMap[stationType] || 'shipyardTab';
 
         this.stationTab = stationType === 'blackmarket' ? 'modules'
                         : stationType === 'mechanic'    ? 'mechanic'
                         : stationType === 'courthouse'  ? 'courthouse'
+                        : stationType === 'marketplace' ? 'marketplace'
                         : 'shipyard';
 
         // Update station title
-        const stationTitles = { shipyard: 'Shipyard', blackmarket: 'Black Market', mechanic: 'Mechanic Station', courthouse: 'Courthouse' };
+        const stationTitles = { shipyard: 'Shipyard', blackmarket: 'Black Market', mechanic: 'Mechanic Station', courthouse: 'Courthouse', marketplace: 'Marketplace' };
         const titleEl = document.getElementById('stationScreenTitle');
-        if (titleEl) titleEl.textContent = (sys && stationTitles[stationType]) || 'Space Station';
+        const baseTitle = (sys && stationTitles[stationType]) || 'Space Station';
+        const discountSuffix = gameState.playerFaction === 'merchants' ? ' <span style="color:#ffcc44;font-size:0.7em;font-weight:normal;">50% off</span>' : '';
+        if (titleEl) titleEl.innerHTML = baseTitle + discountSuffix;
 
-        const allTabIds = ['shipyardTab', 'modulesTab', 'mechanicTab', 'courthouseTab'];
+        const allTabIds = ['shipyardTab', 'modulesTab', 'mechanicTab', 'courthouseTab', 'marketplaceTab'];
         allTabIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = (id === activeTabId) ? '' : 'none';
@@ -95,28 +113,32 @@ UISystem.updateStationScreen = function(gameState) {
         if (this.stationTab === 'shipyard') {
             const deadShips = gameState.playerShips.filter(s => !s.alive);
             const aliveCount = aliveShips.length;
-            const canBuy = offer && gameState.credits >= offer.cost && aliveCount < CONSTANTS.PLAYER_STARTING_SHIPS;
+            const canBuy = offer && gameState.credits >= offer.cost && aliveCount < maxFleetSize(gameState);
 
+            const resurrectCost = this._discountedCost(CONSTANTS.RESURRECT_COST, gameState);
             const deadRows = deadShips.map(ship => {
-                const canAfford = gameState.credits >= CONSTANTS.RESURRECT_COST;
+                const canAfford = gameState.credits >= resurrectCost;
                 return `<tr>
                     <td>${ship.name} <span style="color:#ff4444;font-size:0.8em;">[DESTROYED]</span></td>
                     <td style="color:#aaa;font-size:0.85em;">${ship.shipType} · Lv${ship.level || 1}</td>
-                    <td style="text-align:right;white-space:nowrap;">${CONSTANTS.RESURRECT_COST} cr</td>
+                    <td style="text-align:right;white-space:nowrap;">${resurrectCost} cr</td>
                     <td><button class="btn-primary btn-sm" ${!canAfford ? 'disabled' : ''} data-resurrect-ship-index="${gameState.playerShips.indexOf(ship)}">Resurrect</button></td>
                 </tr>`;
             }).join('');
 
+            const discountedOffers = (this.currentStationOffer || []).map(o =>
+                ({ ...o, cost: this._discountedCost(o.cost, gameState) }));
             contentHtml = `
                 <div class="station-section">
-                    ${this.renderOfferTable(this.currentStationOffer, this.selectedOfferIndex, 0)}
+                    ${this.renderOfferTable(discountedOffers, this.selectedOfferIndex, 0)}
                     <div class="station-action-row" style="margin-top:0.5em;">
                         <button id="buyButton" class="btn-primary" ${!canBuy ? 'disabled' : ''}>Buy (${offer ? offer.cost : '?'} cr)</button>
+                        <span style="color:#666;font-size:0.8em;align-self:center;">Fleet: ${aliveCount}/${maxFleetSize(gameState)}</span>
                         ${currentShip ? `<button id="junkButton" class="btn-secondary" ${aliveCount <= 1 && currentShip.alive ? 'disabled' : ''}>Junk Selected</button>` : ''}
                     </div>
                     ${deadShips.length > 0 ? `
                         <div style="margin-top:1em;">
-                            <div style="color:#ff8888;font-weight:bold;margin-bottom:0.3em;">Destroyed Ships — ${CONSTANTS.RESURRECT_COST} cr each</div>
+                            <div style="color:#ff8888;font-weight:bold;margin-bottom:0.3em;">Destroyed Ships — ${resurrectCost} cr each</div>
                             <table class="ship-status-table" style="width:100%;">
                                 <tbody>${deadRows}</tbody>
                             </table>
@@ -141,8 +163,9 @@ UISystem.updateStationScreen = function(gameState) {
                   }).join(', ')
                 : 'None';
 
-            const offers = this.currentModuleOffer || [];
-            const moduleRows = currentShip ? offers.map(offer => {
+            const offers = (this.currentModuleOffer || []).map(o =>
+                ({ ...o, cost: this._discountedCost(o.cost, gameState) }));
+            const moduleRows = currentShip ? offers.map((offer, offerIdx) => {
                 const mod = offer.moduleDef;
                 const isBuiltin  = builtinIds.includes(mod.id);
                 const installed  = currentShip.modules.some(m => m.id === mod.id);
@@ -160,7 +183,7 @@ UISystem.updateStationScreen = function(gameState) {
                     <td style="white-space:nowrap;">${mod.name}${qualLabel}</td>
                     <td style="color:#aaa;font-size:0.9em;">${mod.desc}</td>
                     <td style="text-align:right;white-space:nowrap;">${offer.cost} cr</td>
-                    <td><button class="btn-primary btn-sm" ${disabled ? 'disabled' : ''} data-module-offer-index="${offers.indexOf(offer)}">${label}</button></td>
+                    <td><button class="btn-primary btn-sm" ${disabled ? 'disabled' : ''} data-module-offer-index="${offerIdx}">${label}</button></td>
                 </tr>`;
             }).join('') : '';
 
@@ -188,7 +211,8 @@ UISystem.updateStationScreen = function(gameState) {
             const rows = gameState.playerShips.map((ship, idx) => {
                 const level = ship.level || 1;
                 const maxed = level >= 5;
-                const nextCost = maxed ? null : LEVEL_COSTS[level - 1];
+                const rawUpgradeCost = maxed ? null : LEVEL_COSTS[level - 1];
+                const nextCost = maxed ? null : this._discountedCost(rawUpgradeCost, gameState);
                 const nextMult = maxed ? null : LEVEL_MULTS[level];
                 const canAfford = !maxed && gameState.credits >= nextCost;
                 const isAlive = ship.alive;
@@ -214,11 +238,71 @@ UISystem.updateStationScreen = function(gameState) {
                     </table>
                 </div>`;
 
-        } else if (this.stationTab === 'courthouse') {
-            const bounty = gameState.bounty || 0;
-            const canPay = bounty > 0 && gameState.credits >= bounty;
+        } else if (this.stationTab === 'marketplace') {
+            const items = (this.currentItemOffer || []).map(i =>
+                ({ ...i, cost: this._discountedCost(i.cost, gameState) }));
+            const itemRows = items.map(item => {
+                const canAfford = gameState.credits >= item.cost;
+                const inv = currentShip ? (currentShip.inventory || []) : [];
+                const cap = currentShip ? (currentShip.cargoCapacity || 1) : 1;
+                const full = inv.length >= cap;
+                const disabled = !currentShip || !canAfford || full;
+                const label = full ? 'Full' : 'Buy';
+                return `<tr>
+                    <td style="color:#ffcc44;white-space:nowrap;">${item.name}</td>
+                    <td style="color:#aaa;font-size:0.9em;">${item.desc}</td>
+                    <td style="text-align:right;white-space:nowrap;">${item.cost} cr</td>
+                    <td><button class="btn-primary btn-sm" ${disabled ? 'disabled' : ''} data-buy-item-id="${item.id}" data-buy-item-cost="${item.cost}">${label}</button></td>
+                </tr>`;
+            }).join('');
+
+            const cargoRows = gameState.playerShips.filter(s => s.alive).map(ship => {
+                const inv = ship.inventory || [];
+                const cap = ship.cargoCapacity || 1;
+                const invDisplay = inv.length > 0
+                    ? inv.map(id => { const it = (CONSTANTS.ITEMS||[]).find(i=>i.id===id); return it ? it.name : id; }).join(', ')
+                    : '<span style="color:#555;">Empty</span>';
+                return `<tr>
+                    <td>${ship.name}</td>
+                    <td style="color:#aaa;font-size:0.85em;">${ship.shipType}</td>
+                    <td style="text-align:center;">${inv.length}/${cap}</td>
+                    <td style="font-size:0.85em;">${invDisplay}</td>
+                </tr>`;
+            }).join('');
+
             contentHtml = `
                 <div class="station-section">
+                    <p style="color:#aaa;font-size:0.9em;">Items are consumed on use during combat. Select a ship to buy items for it.</p>
+                    <table class="ship-status-table" style="margin-top:0.5em;width:100%;">
+                        <thead><tr><th>Item</th><th>Effect</th><th>Cost</th><th></th></tr></thead>
+                        <tbody>${itemRows}</tbody>
+                    </table>
+                </div>
+                <div class="station-section" style="margin-top:1em;">
+                    <div class="header-3" style="margin-bottom:0.4em;">Fleet Cargo</div>
+                    <table class="ship-status-table" style="width:100%;">
+                        <thead><tr><th>Ship</th><th>Type</th><th>Cargo</th><th>Items</th></tr></thead>
+                        <tbody>${cargoRows}</tbody>
+                    </table>
+                </div>`;
+
+        } else if (this.stationTab === 'courthouse') {
+            if (gameState.playerFaction === 'pirates') {
+                contentHtml = `<div class="station-section">
+                    <p style="color:#ff4444;font-weight:bold;">Not Welcome</p>
+                    <p style="color:#aaa;font-size:0.9em;">Pirates have no business here. The courthouse doors are shut to you.</p>
+                </div>`;
+                document.getElementById('stationTabContent').innerHTML = contentHtml;
+                this.setupStationButtons(gameState, currentShip);
+                return;
+            }
+            const bounty = gameState.bounty || 0;
+            const canPay = bounty > 0 && gameState.credits >= bounty;
+            const contracts = gameState.contracts || 0;
+            const canCollect = contracts > 0;
+            contentHtml = `
+                <div class="station-section">
+                    <div class="header-3" style="margin-bottom:0.4em;">Bounty Office</div>
                     <p>Current Bounty: <span style="color:${bounty > 0 ? '#ff4444' : '#00ff88'};font-weight:bold;">${bounty} credits</span></p>
                     ${bounty > 0
                         ? `<p style="color:#aaa;font-size:0.9em;">Paying your bounty clears your criminal record. Cost: ${bounty} credits.</p>
@@ -227,6 +311,22 @@ UISystem.updateStationScreen = function(gameState) {
                            </div>
                            ${!canPay ? '<p style="color:#ff6666;font-size:0.85em;">Insufficient credits.</p>' : ''}`
                         : '<p style="color:#00ff88;">No outstanding bounty. You are free to travel.</p>'
+                    }
+                </div>
+                <div class="station-section" style="margin-top:1em;">
+                    <div class="header-3" style="margin-bottom:0.4em;">Pirate Contracts</div>
+                    <p>Pending Contracts: <span style="color:${contracts > 0 ? '#44ffdd' : '#aaa'};font-weight:bold;">${contracts}</span></p>
+                    ${canCollect
+                        ? (() => {
+                            const isPolice    = gameState.playerFaction === 'police';
+                            const creditValue = isPolice ? contracts * 2 : contracts;
+                            const bonusNote   = isPolice ? ' <span style="color:#4488ff;font-size:0.85em;">(2× police bonus)</span>' : '';
+                            return `<p style="color:#aaa;font-size:0.9em;">Convert your pirate bounty contracts to ${creditValue} credits.${bonusNote}</p>
+                           <div class="station-action-row">
+                               <button id="collectContractsButton" class="btn-primary">Collect ${creditValue} Credits</button>
+                           </div>`;
+                          })()
+                        : '<p style="color:#aaa;font-size:0.9em;">Defeat pirate ships to earn contracts. Collect here for credits.</p>'
                     }
                 </div>`;
         }
@@ -254,8 +354,13 @@ UISystem.setupStationButtons = function(gameState, currentShip) {
                     creditsBefore: gameState.credits,
                     creditsAfter: gameState.credits - offer.cost,
                     onConfirm: () => {
-                        if (StationSystem.buyNewShip(gameState, offer.stats, offer.cost)) {
-                            gameState.selectedShip = gameState.playerShips[gameState.playerShips.length - 1];
+                        // Use offer.cost which is already discounted
+                        if (gameState.credits >= offer.cost && gameState.playerShips.filter(s => s.alive).length < maxFleetSize(gameState)) {
+                            gameState.credits -= offer.cost;
+                            const newShip = new Ship(0, 0, true, 0, offer.stats);
+                            newShip._buyPrice = offer.cost;
+                            gameState.playerShips.push(newShip);
+                            gameState.selectedShip = newShip;
                             this.currentStationOffer = null;
                             this.updateStationScreen(gameState);
                         }
@@ -293,16 +398,21 @@ UISystem.setupStationButtons = function(gameState, currentShip) {
                 const idx = Number(btn.dataset.resurrectShipIndex);
                 const ship = gameState.playerShips[idx];
                 if (!ship) return;
+                const resCost = this._discountedCost(CONSTANTS.RESURRECT_COST, gameState);
                 this.showConfirmModal({
                     title: 'Resurrect Ship',
                     lines: [
                         `Revive ${ship.name} (${ship.shipType}) at 25% hull.`,
-                        `Cost: ${CONSTANTS.RESURRECT_COST} credits`,
+                        `Cost: ${resCost} credits`,
                     ],
                     creditsBefore: gameState.credits,
-                    creditsAfter: gameState.credits - CONSTANTS.RESURRECT_COST,
+                    creditsAfter: gameState.credits - resCost,
                     onConfirm: () => {
-                        if (StationSystem.resurrectShip(gameState, ship)) {
+                        if (gameState.credits >= resCost && !ship.alive) {
+                            gameState.credits -= resCost;
+                            ship.alive = true;
+                            ship.hull  = Math.max(1, Math.round(ship.maxHull * 0.25));
+                            ship.shields = 0;
                             this.updateStationScreen(gameState);
                         }
                     }
@@ -329,13 +439,36 @@ UISystem.setupStationButtons = function(gameState, currentShip) {
             };
         }
 
+        const collectContractsBtn = document.getElementById('collectContractsButton');
+        if (collectContractsBtn) {
+            collectContractsBtn.onclick = () => {
+                const contracts = gameState.contracts || 0;
+                if (contracts <= 0) return;
+                const isPolice     = gameState.playerFaction === 'police';
+                const creditValue  = isPolice ? contracts * 2 : contracts;
+                const bonusNote    = isPolice ? ' (2× police bonus)' : '';
+                this.showConfirmModal({
+                    title: 'Collect Contracts',
+                    lines: [`Convert ${contracts} pending contracts to ${creditValue} credits.${bonusNote}`],
+                    creditsBefore: gameState.credits,
+                    creditsAfter: gameState.credits + creditValue,
+                    onConfirm: () => {
+                        gameState.credits += creditValue;
+                        gameState.contracts = 0;
+                        this.updateStationScreen(gameState);
+                    }
+                });
+            };
+        }
+
         document.querySelectorAll('[data-upgrade-ship-index]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const idx = Number(btn.dataset.upgradeShipIndex);
                 const ship = gameState.playerShips[idx];
                 if (!ship) return;
                 const level = ship.level || 1;
-                const cost = CONSTANTS.SHIP_LEVEL_COSTS[level - 1];
+                const rawCost  = CONSTANTS.SHIP_LEVEL_COSTS[level - 1];
+                const cost     = this._discountedCost(rawCost, gameState);
                 const nextMult = CONSTANTS.SHIP_LEVEL_MULTS[level];
                 this.showConfirmModal({
                     title: 'Upgrade Ship',
@@ -347,9 +480,43 @@ UISystem.setupStationButtons = function(gameState, currentShip) {
                     creditsBefore: gameState.credits,
                     creditsAfter: gameState.credits - cost,
                     onConfirm: () => {
-                        if (StationSystem.upgradeShipLevel(gameState, ship)) {
+                        if (gameState.credits >= cost && (ship.level || 1) < 5) {
+                            gameState.credits -= cost;
+                            ship.upgradeLevel();
                             this.updateStationScreen(gameState);
                         }
+                    }
+                });
+            });
+        });
+
+        document.querySelectorAll('[data-buy-item-id]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (!currentShip) return;
+                const itemId = btn.dataset.buyItemId;
+                const cost = Number(btn.dataset.buyItemCost);
+                const item = (CONSTANTS.ITEMS || []).find(i => i.id === itemId);
+                if (!item || gameState.credits < cost) return;
+                const inv = currentShip.inventory || (currentShip.inventory = []);
+                const cap = currentShip.cargoCapacity || 1;
+                if (inv.length >= cap) return;
+                this.showConfirmModal({
+                    title: 'Buy Item',
+                    lines: [
+                        `<strong>${item.name}</strong> → ${currentShip.name}`,
+                        item.desc,
+                        `Cargo: ${inv.length}/${cap} (will be ${inv.length + 1}/${cap})`,
+                        `Cost: ${cost} credits`,
+                    ],
+                    creditsBefore: gameState.credits,
+                    creditsAfter: gameState.credits - cost,
+                    onConfirm: () => {
+                        if (gameState.credits < cost) return;
+                        const inv2 = currentShip.inventory || (currentShip.inventory = []);
+                        if (inv2.length >= (currentShip.cargoCapacity || 1)) return;
+                        gameState.credits -= cost;
+                        inv2.push(itemId);
+                        this.updateStationScreen(gameState);
                     }
                 });
             });
@@ -374,11 +541,12 @@ UISystem.setupStationButtons = function(gameState, currentShip) {
             btn.addEventListener('click', () => {
                 if (!currentShip) return;
                 const offerIdx = Number(btn.dataset.moduleOfferIndex);
-                const offer = this.currentModuleOffer ? this.currentModuleOffer[offerIdx] : null;
-                if (!offer) return;
+                const rawOffer = this.currentModuleOffer ? this.currentModuleOffer[offerIdx] : null;
+                if (!rawOffer) return;
+                const offer     = rawOffer;
                 const moduleDef = offer.moduleDef;
                 const quality   = offer.quality;
-                const cost      = offer.cost;
+                const cost      = this._discountedCost(offer.cost, gameState);
 
                 const e = moduleDef.effect;
                 const s = currentShip;

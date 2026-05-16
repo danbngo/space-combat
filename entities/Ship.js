@@ -32,6 +32,11 @@ class Ship {
             this.engine = Math.max(5, Math.round((S.ENGINE_MIN + S.ENGINE_MAX) / 2 * typeData.engineMult));
         }
         
+        // Cargo capacity — derived from ship type (carries items into combat)
+        const _cargoTypeData = CONSTANTS.SHIP_TYPES.find(t => t.type === this.shipType);
+        this.cargoCapacity = _cargoTypeData?.cargoCapacity ?? 1;
+        this.inventory = [];
+
         // Level system — stores base stats so upgrades scale correctly
         this.level = 1;
         this._baseMaxHull = this.maxHull;
@@ -71,8 +76,11 @@ class Ship {
         this.cloaked = false;
         this.cloakTurnsRemaining = 0;
 
-        // Active status effect — null | 'dust' | 'ice' | 'plasma' (set each frame by Combat.updateStatusFlags)
-        this.statusEffect = null;
+        // Cloud status effect turns — set to 1 each frame while in cloud, decremented each round-end
+        // 0-persistence: expires one round after the ship leaves the cloud
+        this.dustTurns   = 0;
+        this.iceTurns    = 0;
+        this.plasmaTurns = 0;
 
         // Animations
         this.targetX = x;
@@ -114,7 +122,7 @@ class Ship {
     takeDamage(damage, isLaser = false) {
         if ((this.phasedTurns || 0) > 0) return { shieldAbsorb: 0, hullDmg: 0 };
         if ((this.stasisTurns || 0) > 0) return { shieldAbsorb: 0, hullDmg: 0 };
-        if (!isLaser && this.statusEffect === 'ice' && damage > 0) damage = Math.ceil(damage * CONSTANTS.FROZEN_DAMAGE_MULT);
+        if (!isLaser && (this.iceTurns || 0) > 0 && damage > 0) damage = Math.ceil(damage * CONSTANTS.FROZEN_DAMAGE_MULT);
         if (damage > 0) this.decloak();
         const absorbedByShields = Math.min(damage, this.shields);
         const remainingDamage = damage - absorbedByShields;
@@ -187,6 +195,8 @@ class Ship {
         } else if (e.type === 'ion_laser') {
             this.laserDamage += amt;
             this.hasIonLaser = true;
+        } else if (e.type === 'cargo_increase') {
+            this.cargoCapacity = (this.cargoCapacity || 1) + amt;
         }
     }
 
@@ -253,7 +263,7 @@ class Ship {
     skipTurn() {
         this.actionsRemaining = Math.max(0, this.actionsRemaining - 1);
         const base = Math.floor(this.engine / 2);
-        this.rechargeShields(this.statusEffect === 'plasma' ? base * CONSTANTS.OVERHEATED_SHIELD_MULT : base);
+        this.rechargeShields((this.plasmaTurns || 0) > 0 ? base * CONSTANTS.OVERHEATED_SHIELD_MULT : base);
     }
 
     clone() {

@@ -92,6 +92,46 @@ function areShipsInContactTriangle(ship1, ship2) {
     return Math.abs(angleDiff) < CONSTANTS.SHOOTING_ANGLE;
 }
 
+// Returns the max fleet size for the player based on leadership perks.
+function maxFleetSize(gs) {
+    const perks = gs.perks || [];
+    const leadership = ['leadership_1','leadership_2','leadership_3','leadership_4'];
+    const count = leadership.filter(id => perks.includes(id)).length;
+    return (CONSTANTS.DEFAULT_FLEET_SIZE || 2) + count;
+}
+
+// Returns the commander's current level derived from total exp and EXP_THRESHOLDS.
+function commanderLevel(exp) {
+    const thresholds = CONSTANTS.EXP_THRESHOLDS || [];
+    let level = 0;
+    let remaining = exp;
+    for (const threshold of thresholds) {
+        if (remaining >= threshold) { remaining -= threshold; level++; }
+        else break;
+    }
+    return level;
+}
+
+// Exp toward the next level and how much is needed for the next level.
+function expProgress(exp) {
+    const thresholds = CONSTANTS.EXP_THRESHOLDS || [];
+    let remaining = exp;
+    for (let i = 0; i < thresholds.length; i++) {
+        if (remaining >= thresholds[i]) { remaining -= thresholds[i]; }
+        else return { current: remaining, needed: thresholds[i] };
+    }
+    return { current: 0, needed: null }; // max level
+}
+
+// Computes a stat-based ship price.
+function calcShipCost(stats) {
+    const total = (stats.hull || 0) + (stats.shields || 0) + (stats.laser || 0) + (stats.engine || 0) + (stats.radar || 0);
+    const base  = Math.round(Math.pow(total, CONSTANTS.SHIP_COST_EXP || 1.25) * (CONSTANTS.SHIP_COST_SCALE || 1.5));
+    const variance = CONSTANTS.SHIP_COST_VARIANCE || 0.15;
+    const mult = 1 + randomFloat(-variance, variance);
+    return Math.max(50, Math.round(base * mult));
+}
+
 function normalizeAngle(angle) {
     while (angle > Math.PI) angle -= 2 * Math.PI;
     while (angle < -Math.PI) angle += 2 * Math.PI;
@@ -138,7 +178,7 @@ function assignFleetNames(ships) {
 
 // Effective engine value accounting for frozen and supercharged status.
 function getEffectiveEngine(ship) {
-    let eng = ship.statusEffect === 'ice'
+    let eng = (ship.iceTurns || 0) > 0
         ? Math.max(1, ship.engine * CONSTANTS.FROZEN_MOVE_MULT)
         : ship.engine;
     if ((ship.superchargedTurns || 0) > 0) eng *= 2;

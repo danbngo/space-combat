@@ -375,6 +375,7 @@ body {
 
 .combat-tab-content {
     overflow-y: auto;
+    overflow-x: hidden;
     flex: 1;
     min-height: 0;
     padding-top: 0.5em;
@@ -764,8 +765,58 @@ span[data-tooltip], span[data-tooltip-title] { cursor: help; }
 }
 
 .ship-table-row.selected {
-    background: rgba(255, 255, 255, 0.1);
-    outline: 1px solid #ffffff;
+    background: rgba(0, 255, 255, 0.12);
+    outline: 1px solid #00ffff;
+}
+
+.ship-table-row.active-turn {
+    background: rgba(0, 255, 68, 0.15);
+    outline: 1px solid #00ff44;
+}
+
+.combat-actions-overlay {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.combat-actions-overlay.visible {
+    pointer-events: auto;
+}
+
+.combat-actions-overlay .combat-action-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 0;
+}
+
+.combat-actions-overlay .btn-primary,
+.combat-actions-overlay .btn-secondary {
+    background: rgba(10, 10, 10, 0.85);
+    border-color: rgba(255, 255, 255, 0.55);
+}
+
+.combat-actions-overlay .btn-primary:hover:not(:disabled),
+.combat-actions-overlay .btn-secondary:hover:not(:disabled) {
+    background: #ffffff;
+    color: #000000;
+    border-color: #ffffff;
+}
+
+.combat-actions-overlay .btn-primary:disabled,
+.combat-actions-overlay .btn-secondary:disabled {
+    opacity: 0.3;
+    color: #666;
+    border-color: #333;
+    cursor: not-allowed;
+    background: rgba(10, 10, 10, 0.85);
 }
 
 .ship-table-row.destroyed {

@@ -2,60 +2,61 @@
 // Loaded after UI.js
 
 UISystem.updateCombatScreen = function(gameState, combat) {
-        const panel = document.getElementById('combatSidebarPanel');
+        const panel    = document.getElementById('combatSidebarPanel');
         const logPanel = document.getElementById('combatLogPanel');
+        const overlay  = document.getElementById('combatActionsOverlay');
         if (!panel) return;
 
-        // Sync tab button active states
-        const actionsTabEl = document.getElementById('combatActionsTab');
-        const infoTabEl = document.getElementById('combatInfoTab');
-        if (actionsTabEl) actionsTabEl.classList.toggle('active', this.combatTab === 'actions');
-        if (infoTabEl) infoTabEl.classList.toggle('active', this.combatTab === 'info');
-
-        const isPlayerTurn = combat.state === COMBAT_STATE.PLAYER_TURN;
-        const isResolving = combat.state === COMBAT_STATE.RESOLVING || combat.state === COMBAT_STATE.ENEMY_TURN;
+        const isPlayerTurn  = combat.state === COMBAT_STATE.PLAYER_TURN;
+        const isResolving   = combat.state === COMBAT_STATE.RESOLVING || combat.state === COMBAT_STATE.ENEMY_TURN;
         const activeTurnShip = isPlayerTurn ? combat.playerShips[combat.currentShipIndex] : null;
-        const playerAlive = combat.playerShips.filter(s => s.alive).length;
-        const enemyAlive = combat.enemyShips.filter(s => s.alive).length;
+        const playerAlive   = combat.playerShips.filter(s => s.alive).length;
+        const enemyAlive    = combat.enemyShips.filter(s => s.alive).length;
 
-        if (this.combatTab === 'info') {
-            panel.innerHTML = `
-                <div class="header-3" style="background-color:#111;color:#00ffff;">
-                    Player Fleet ${playerAlive}/${combat.playerShips.length}
-                </div>
-                ${this.renderShipTable(combat.playerShips, { selectable: true, selectedShip: combat.selectedCombatShip })}
-                <div class="header-3" style="background-color:#111;color:#ff5555;margin-top:0.5em;">
-                    Enemy Fleet ${enemyAlive}/${combat.enemyShips.length}
-                </div>
-                ${this.renderShipTable(combat.enemyShips, { isEnemy: true, selectedShip: combat.selectedCombatShip })}`;
+        const playerFactionData = gameState.playerFaction
+            ? (typeof PLAYER_FACTIONS !== 'undefined' ? PLAYER_FACTIONS.find(f => f.id === gameState.playerFaction) : null)
+            : null;
+        const enemyFactionData = combat.encounterFaction
+            ? CONSTANTS.FACTIONS.find(f => f.id === combat.encounterFaction)
+            : null;
+        const playerFactionBadge = playerFactionData
+            ? ` <span style="color:${playerFactionData.color};font-size:0.75em;font-weight:normal;">[${playerFactionData.name}]</span>` : '';
+        const enemyFactionBadge  = enemyFactionData
+            ? ` <span style="color:${enemyFactionData.color};font-size:0.75em;font-weight:normal;">[${enemyFactionData.name}]</span>` : '';
 
-            // Combat log in the bottom panel on info tab
-            if (logPanel) {
-                const logEntries = combat.combatLog || [];
-                const prevScroll = logPanel.scrollTop;
-                if (logEntries.length > 0) {
-                    logPanel.innerHTML =
-                        `<div class="header-3" style="margin-bottom:0.25em;">Combat Log</div>` +
-                        `<div style="font-size:0.68em;color:#888;line-height:1.55;">` +
-                        logEntries.map(m => `<div>${m}</div>`).join('') +
-                        `</div>`;
-                } else {
-                    logPanel.innerHTML = '';
-                }
-                logPanel.scrollTop = prevScroll;
+        // ── Sidebar: always show info (ship tables + combat log) ─────────────
+        panel.innerHTML = `
+            <div class="header-3" style="background-color:#111;color:#00ffff;">
+                Player Fleet ${playerAlive}/${combat.playerShips.length}${playerFactionBadge}
+            </div>
+            ${this.renderShipTable(combat.playerShips, { selectable: true, activeShip: activeTurnShip, selectedShip: combat.selectedCombatShip })}
+            <div class="header-3" style="background-color:#111;color:#ff5555;margin-top:0.5em;">
+                Enemy Fleet ${enemyAlive}/${combat.enemyShips.length}${enemyFactionBadge}
+            </div>
+            ${this.renderShipTable(combat.enemyShips, { isEnemy: true, selectedShip: combat.selectedCombatShip })}`;
+
+        if (logPanel) {
+            const logEntries = combat.combatLog || [];
+            const prevScroll = logPanel.scrollTop;
+            if (logEntries.length > 0) {
+                logPanel.innerHTML =
+                    `<div class="header-3" style="margin-bottom:0.25em;">Combat Log</div>` +
+                    `<div style="font-size:0.68em;color:#888;line-height:1.55;">` +
+                    logEntries.map(m => `<div>${m}</div>`).join('') +
+                    `</div>`;
+            } else {
+                logPanel.innerHTML = '';
             }
-        } else {
-            // Actions tab — active ship + buttons in top panel
-            let activeTurnHtml = '';
-            if (activeTurnShip) {
-                const pips = '●'.repeat(activeTurnShip.actionsRemaining) + '○'.repeat(2 - activeTurnShip.actionsRemaining);
-                activeTurnHtml = `
-                    <div class="header-3" style="background-color:#002200;color:#00ff44;">Active: ${activeTurnShip.name || '?'} <span style="color:#88ff88;font-size:0.85em;letter-spacing:3px;">${pips}</span></div>
-                    ${this.renderShipTable([activeTurnShip], { showStats: true })}
-                    ${this.renderStatusEffects(activeTurnShip)}`;
-            }
+            logPanel.scrollTop = prevScroll;
+        }
 
-            let actionsHtml = '';
+        // ── Overlay: action buttons on canvas, player turn only ──────────────
+        if (!overlay) { this.setupCombatButtons(gameState, combat, activeTurnShip); return; }
+
+        const showOverlay = isPlayerTurn && activeTurnShip && activeTurnShip.alive && !combat.isAnimating();
+        overlay.classList.toggle('visible', !!showOverlay);
+
+        let actionsHtml = '';
             if (isPlayerTurn && activeTurnShip && activeTurnShip.isDrone) {
                 actionsHtml = `<p style="color:#ffaa44;font-size:0.85em;text-align:center;margin-top:0.5em;">Drone acting...</p>`;
             } else if (isPlayerTurn && activeTurnShip && (activeTurnShip.berserkTurns || 0) > 0) {
@@ -232,14 +233,33 @@ UISystem.updateCombatScreen = function(gameState, combat) {
                         </div>
                         <p style="color:#88eeff;font-size:0.8em;margin-top:0.5em;text-align:center;">Click within range to deploy a stasis cloud — ships inside cannot act or take damage</p>`;
                 } else {
-                    const overheated = activeTurnShip.statusEffect === 'plasma';
+                    const overheated = (activeTurnShip.plasmaTurns || 0) > 0;
                     const blinded    = (activeTurnShip.blindedTurns || 0) > 0;
                     const anchored   = (activeTurnShip.anchoredTurns || 0) > 0;
                     const inStasis   = (activeTurnShip.stasisTurns  || 0) > 0;
-                    const hasStatus  = !!activeTurnShip.statusEffect;
+                    const hasStatus  = (activeTurnShip.dustTurns || 0) > 0 || (activeTurnShip.iceTurns || 0) > 0 || (activeTurnShip.plasmaTurns || 0) > 0;
                     const dis     = !hasActions || isAnimating || inStasis ? 'disabled' : '';
                     const moveDis = !hasActions || isAnimating || anchored || inStasis ? 'disabled' : '';
                     const fireDis = !hasActions || !hasValidTargets || isAnimating || overheated || blinded || inStasis ? 'disabled' : '';
+
+                    const _hr = activeTurnShip.hull / activeTurnShip.maxHull;
+                    const _hullColor = _hr > 0.5 ? '#00ffff' : _hr > 0.25 ? '#ffff00' : '#ff3333';
+                    const _hullPct   = Math.max(0, Math.min(100, _hr * 100)).toFixed(1);
+                    const _shldPct   = activeTurnShip.maxShields > 0
+                        ? Math.max(0, Math.min(100, activeTurnShip.shields / activeTurnShip.maxShields * 100)).toFixed(1) : 0;
+                    const shipInfoHtml = `<div style="font-size:0.76em;border-bottom:1px solid #2a2a2a;padding-bottom:0.3em;margin-bottom:0.3em;">
+                        <div style="font-weight:bold;color:#ddd;margin-bottom:0.2em;">${activeTurnShip.name} <span style="color:#555;font-weight:normal;font-size:0.88em;">${activeTurnShip.shipType}</span></div>
+                        <div style="display:flex;align-items:center;gap:3px;margin-bottom:0.12em;">
+                            <span style="color:#888;width:28px;flex-shrink:0;font-size:0.9em;">Hull</span>
+                            <div style="flex:1;height:5px;background:#181818;border-radius:2px;"><div style="height:100%;border-radius:2px;width:${_hullPct}%;background:${_hullColor};"></div></div>
+                            <span style="color:${_hullColor};width:44px;text-align:right;flex-shrink:0;font-size:0.88em;">${activeTurnShip.hull}/${activeTurnShip.maxHull}</span>
+                        </div>
+                        ${activeTurnShip.maxShields > 0 ? `<div style="display:flex;align-items:center;gap:3px;">
+                            <span style="color:#888;width:28px;flex-shrink:0;font-size:0.9em;">Shld</span>
+                            <div style="flex:1;height:5px;background:#181818;border-radius:2px;"><div style="height:100%;border-radius:2px;width:${_shldPct}%;background:#00ccff;"></div></div>
+                            <span style="color:#00ccff;width:44px;text-align:right;flex-shrink:0;font-size:0.88em;">${activeTurnShip.shields}/${activeTurnShip.maxShields}</span>
+                        </div>` : ''}
+                    </div>`;
 
                     // Special move buttons — one per move the ship has
                     const WEAPON_MOVES = new Set(['chaingun', 'plasma_cannon', 'rocket_launcher']);
@@ -272,43 +292,30 @@ UISystem.updateCombatScreen = function(gameState, combat) {
                         fireOrWeaponBtn = `<button id="combatFireBtn" class="btn-primary" ${fireDis} data-tooltip="Fire lasers at an enemy within range and firing arc.">Fire</button>`;
                     }
 
+                    const ITEMS = CONSTANTS.ITEMS || [];
+                    const itemBtns = (activeTurnShip.inventory || []).map(itemId => {
+                        const item = ITEMS.find(i => i.id === itemId);
+                        if (!item) return '';
+                        return `<button class="btn-primary combat-item-btn" ${dis} data-item-id="${itemId}" data-tooltip="${item.desc}" style="color:#ffcc44;">${item.name}</button>`;
+                    }).join('');
+
                     const rechargeTooltip = inStasis ? 'In stasis — cannot act.' :
                         (activeTurnShip.maxShields > 0 && activeTurnShip.shields >= activeTurnShip.maxShields
                         ? 'Pass your turn without acting.'
                         : 'Skip your turn to recharge shields.');
-                    actionsHtml = `
+                    actionsHtml = shipInfoHtml + `
                         <div style="text-align:center;font-size:0.8em;color:#aaa;margin-bottom:0.25em;">Actions: ${activeTurnShip.actionsRemaining}/2${inStasis ? ' <span style="color:#88eeff">[STASIS]</span>' : ''}</div>
                         <div class="combat-action-row">
                             <button id="combatMoveBtn" class="btn-primary" ${moveDis} data-tooltip="${anchored ? 'Cannot move — anchored!' : inStasis ? 'Cannot act — in stasis!' : 'Move your ship within range, or click an adjacent enemy to ram.'}">Move${anchored ? ' [Anchored]' : ''}</button>
                             ${fireOrWeaponBtn}
                             <button id="combatSkipBtn" class="btn-secondary" ${dis} data-tooltip="${rechargeTooltip}">${rechargeLabel}</button>
                         </div>
-                        ${specialBtns ? `<div class="combat-action-row" style="margin-top:0.3em;">${specialBtns}</div>` : ''}`;
-                }
-            } else if (isResolving) {
-                actionsHtml = `<p style="text-align:center;color:#ffaa00;padding:0.5em 0;">Enemy acting...</p>`;
-            }
-
-            panel.innerHTML = `${activeTurnHtml}${actionsHtml}`;
-
-            // Selected ship in the bottom panel on actions tab
-            if (logPanel) {
-                const sel = combat.selectedCombatShip;
-                if (sel && sel !== activeTurnShip) {
-                    const isAlly = sel.isPlayer;
-                    const headerColor = isAlly ? '#004455' : '#440000';
-                    const badge = isAlly
-                        ? '<span style="color:#00ffff;">[ALLY]</span>'
-                        : '<span style="color:#ff5555;">[ENEMY]</span>';
-                    logPanel.innerHTML = `
-                        <div class="header-3" style="background-color:${headerColor};color:#fff;">Selected: ${sel.name || '?'} ${badge}</div>
-                        ${this.renderShipTable([sel], { showStats: true })}
-                        ${this.renderStatusEffects(sel)}`;
-                } else {
-                    logPanel.innerHTML = '';
+                        ${specialBtns ? `<div class="combat-action-row" style="margin-top:0.3em;">${specialBtns}</div>` : ''}
+                        ${itemBtns ? `<div class="combat-action-row" style="margin-top:0.3em;">${itemBtns}</div>` : ''}`;
                 }
             }
-        }
+
+        overlay.innerHTML = actionsHtml;
 
         this.setupCombatButtons(gameState, combat, activeTurnShip);
 };
@@ -363,6 +370,16 @@ UISystem.setupCombatButtons = function(gameState, combat, activeTurnShip) {
                 }
             };
         }
+
+        document.querySelectorAll('.combat-item-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const itemId = btn.dataset.itemId;
+                const activeShip = combat.playerShips[combat.currentShipIndex];
+                if (activeShip && activeShip.alive && activeShip.actionsRemaining > 0) {
+                    combat.playerUseItem(activeShip, itemId);
+                }
+            });
+        });
 
         document.querySelectorAll('.combat-special-btn').forEach(btn => {
             btn.addEventListener('click', () => {

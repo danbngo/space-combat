@@ -58,7 +58,7 @@ class SpaceTravel {
 
                     // Each non-queen system is exactly one type of station
                     stationType: tier < QUEEN_TIER
-                        ? ['shipyard', 'blackmarket', 'mechanic', 'courthouse'][Math.floor(Math.random() * 4)]
+                        ? ['shipyard', 'blackmarket', 'mechanic', 'courthouse', 'marketplace'][Math.floor(Math.random() * 5)]
                         : null,
                 };
 
@@ -192,8 +192,11 @@ class SpaceTravel {
         const jitter   = randomInt(-CONSTANTS.FLEET_STRENGTH_JITTER, CONSTANTS.FLEET_STRENGTH_JITTER);
         const strength = Math.max(1, Math.min(CONSTANTS.FLEET_STRENGTH_MAX, base + jitter));
 
-        // Max encounter slots scale with tier (1 at tier 1, up to ROUTE_MAX_ENCOUNTERS)
-        const maxEncounters = Math.max(1, Math.round(1 + (tierFrac * (CONSTANTS.ROUTE_MAX_ENCOUNTERS - 1))));
+        // Encounter count by quarter of the run (Q1 easiest, Q4 hardest)
+        const quarter = Math.floor((destinationTier - 1) * 4 / QUEEN_TIER); // 0–3
+        const encRanges = [[1,2],[1,3],[3,4],[4,5]];
+        const [minEnc, maxEnc] = encRanges[Math.min(quarter, 3)];
+        const maxEncounters = randomInt(minEnc, maxEnc);
 
         // Faction weights: aliens ramp linearly from 0 at ALIEN_WEIGHT_START_TIER to 100% at QUEEN_TIER
         const alienStart  = CONSTANTS.ALIEN_WEIGHT_START_TIER;

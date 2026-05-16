@@ -27,10 +27,15 @@ class Combat {
         this.fleedEnemyShips = [];
         this.selectedCombatShip = null;
         this.playerMode = null; // 'move' | 'fire' | null
+        this.encounterFaction = options.encounterFaction || null;
 
         this.asteroids  = [];
         this.clouds     = [];
         this.cloudType  = null;
+
+        // EXP tracking — accumulates during combat, flushed to gameState on end
+        this.expGained = 0;
+        this._expAwardedFor = new Set(); // ship objects already awarded exp
 
         this.initAsteroids();
         this.initClouds();
@@ -162,8 +167,10 @@ class Combat {
 
     updateStatusFlags() {
         for (const ship of [...this.playerShips, ...this.enemyShips]) {
-            const inCloud = this.isShipInCloud(ship);
-            ship.statusEffect = inCloud ? this.cloudType : null;
+            if (!this.isShipInCloud(ship)) continue;
+            if (this.cloudType === 'dust')   ship.dustTurns   = 1;
+            else if (this.cloudType === 'ice')    ship.iceTurns    = 1;
+            else if (this.cloudType === 'plasma') ship.plasmaTurns = 1;
         }
     }
 
@@ -552,6 +559,7 @@ class Combat {
         this.updateShipAnimations(deltaTime);
         this.updateAsteroidPhysics(deltaTime);
         this.updateAnimationTimers(deltaTime);
+        this._checkNewExpEvents();
         this.checkCombatEnd();
         if (wasAnimating && !this.isAnimating()) {
             // Only resolve overlaps when ships/asteroids actually moved — laser-only
@@ -656,6 +664,7 @@ class Combat {
             self.playerRetreated = true;
             self.addFloatingText('Escaped!', '#88ff88', s.x, s.y - 12);
             self.addLog(`${self._shipLabel(s)}: Escaped!`);
+            self.awardCombatExp(CONSTANTS.EXP_PER_SHIP_FLED || 5, s);
         });
         this.playerShips = this.playerShips.filter(s => !s.fled);
 
