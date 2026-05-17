@@ -121,8 +121,8 @@ function salvagingCreditMult(perks) {
     return 1 + ranks * 0.2;
 }
 
-// Returns the fraction of max hull repaired after combat (0–1).
-function engineeringRepairFraction(perks) {
+// Returns the per-ship resurrection chance from the Engineering perk (0–1).
+function engineeringResurrectionChance(perks) {
     const ranks = ['engineering_1','engineering_2','engineering_3','engineering_4','engineering_5']
         .filter(id => (perks || []).includes(id)).length;
     return Math.min(1.0, ranks * 0.2);

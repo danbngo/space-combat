@@ -11,8 +11,9 @@ const CONSTANTS_CORE = {
     CREDITS_PER_ENEMY_DESTROYED: 100,
 
     // Commander experience
-    EXP_PER_ENEMY_DISABLED: 10,  // enemy ship destroyed or disabled in combat
-    EXP_PER_SHIP_FLED:       5,  // each of your ships that escapes combat
+    EXP_PER_ENEMY_DISABLED:       10,  // enemy ship destroyed or disabled in combat
+    EXP_PER_ALIEN_DISABLED:       25,  // alien ship destroyed (harder, worth more)
+    EXP_PER_SHIP_FLED:             5,  // each of your ships that escapes combat
     // Exp needed to reach each successive commander level (non-cumulative)
     EXP_THRESHOLDS: [10, 25, 100, 300, 900],
 

@@ -602,9 +602,10 @@ class AISystem {
         }
 
         const hullPct = aiShip.hull / aiShip.maxHull;
+        const isAlien = aiShip.shipType && aiShip.shipType.startsWith('Alien');
 
-        // Deterministic flee: critical hull, or shields gone + hull below half
-        if (hullPct < 0.25 || (aiShip.shields <= 0 && hullPct < 0.5)) {
+        // Deterministic flee: critical hull, or shields gone + hull below half (aliens never flee)
+        if (!isAlien && (hullPct < 0.25 || (aiShip.shields <= 0 && hullPct < 0.5))) {
             console.log(`[AI ${aiShip.name}] FLEE (critical) hull=${aiShip.hull}/${aiShip.maxHull} shields=${aiShip.shields}`);
             this.flee(aiShip, combat);
             return;
@@ -620,15 +621,17 @@ class AISystem {
         const shootRange = combat.getShootRange(aiShip);
         const dangerZone = shootRange * CONSTANTS.AI_RETREAT_DANGER_RANGE;
 
-        // Probabilistic tactical retreat for moderately damaged ships
-        const healthFactor = 1 - hullPct;
-        const proximityFactor = Math.max(0, 1 - nearestDist / dangerZone);
-        const retreatThreshold = healthFactor * proximityFactor * CONSTANTS.AI_RETREAT_CHANCE;
+        // Probabilistic tactical retreat for moderately damaged ships (aliens never retreat)
+        if (!isAlien) {
+            const healthFactor = 1 - hullPct;
+            const proximityFactor = Math.max(0, 1 - nearestDist / dangerZone);
+            const retreatThreshold = healthFactor * proximityFactor * CONSTANTS.AI_RETREAT_CHANCE;
 
-        if (Math.random() < retreatThreshold) {
-            console.log(`[AI ${aiShip.name}] RETREAT (tactical) threshold=${retreatThreshold.toFixed(2)} hp=${aiShip.hull}/${aiShip.maxHull}`);
-            this.flee(aiShip, combat);
-            return;
+            if (Math.random() < retreatThreshold) {
+                console.log(`[AI ${aiShip.name}] RETREAT (tactical) threshold=${retreatThreshold.toFixed(2)} hp=${aiShip.hull}/${aiShip.maxHull}`);
+                this.flee(aiShip, combat);
+                return;
+            }
         }
 
         const hasInRangeTargets = alivePlayerShips.some(s =>

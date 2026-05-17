@@ -33,6 +33,9 @@ let _travelContinuation = null;
 // Info about the encounter currently being fought — used to respawn the fleet on player victory.
 let _defeatedEncounterInfo = null;
 
+// Ships resurrected by the Engineering perk — computed at modal-show time, applied in endCombat.
+let _engineeringRevived = [];
+
 // State needed to re-show the travel screen after returning from combat.
 let _travelScreenState = null;
 
@@ -404,6 +407,62 @@ const GameController = {
         // Route hazard flags — threaded into every combat on this route
         const _routeData = routeKey && gameState.routes ? gameState.routes.get(routeKey) : null;
         const _hazardOpts = _routeData ? { hasAsteroids: _routeData.hasAsteroids, cloudType: _routeData.cloudType } : {};
+
+        // ── ABANDONED SHIP ────────────────────────────────────────────────────────
+        if (encounter.faction === 'abandoned_ship') {
+            const modalEl0   = document.getElementById('encounterModal');
+            const titleEl0   = document.getElementById('encounterModalTitle');
+            const bodyEl0    = document.getElementById('encounterModalBody');
+            const engageBtn0 = document.getElementById('encounterEngageBtn');
+            const retreatBtn0 = document.getElementById('encounterRetreatBtn');
+            const closeModal0 = () => { modalEl0.style.display = 'none'; retreatBtn0.style.display = ''; retreatBtn0.textContent = 'Turn Back'; };
+
+            titleEl0.textContent = 'Abandoned Ship';
+            titleEl0.style.color = '#aaaaaa';
+            titleEl0.removeAttribute('data-tooltip-title');
+            titleEl0.removeAttribute('data-tooltip-body');
+            titleEl0.style.cursor = '';
+            bodyEl0.innerHTML = `<p>A drifting ship sits dark and silent in your path. The hull looks intact, but there are no life signs on sensors.</p>
+                <p style="color:#888;font-size:0.85em;margin-top:0.3em;">Investigate the wreck, or leave it behind.</p>`;
+            engageBtn0.style.display = '';
+            engageBtn0.textContent = 'Investigate';
+            retreatBtn0.textContent = 'Ignore';
+            retreatBtn0.style.display = '';
+
+            engageBtn0.onclick = () => {
+                if (Math.random() < 0.5) {
+                    // Pirate ambush
+                    const ambushSize = encounter.fleetStrength <= 3 ? randomInt(1, 2) : randomInt(2, 3);
+                    const ambushFleet = SpaceTravel.generateEnemyFleet({ faction: 'pirates', size: ambushSize, fleetStrength: encounter.fleetStrength });
+                    retreatBtn0.style.display = 'none';
+                    titleEl0.textContent = 'Ambush!';
+                    titleEl0.style.color = '#ff4444';
+                    bodyEl0.innerHTML = `<p style="color:#ff4444;"><strong>It's a trap!</strong> Pirates were hiding inside — they spring out and open fire!</p>`;
+                    engageBtn0.textContent = 'Fight';
+                    engageBtn0.onclick = () => {
+                        closeModal0();
+                        _defeatedEncounterInfo = { faction: 'pirates', size: ambushSize, fameDelta: 1, isQueenFight: false };
+                        gameState.enemyShips = ambushFleet;
+                        _travelContinuation = onContinue;
+                        this.startCombat({ ..._hazardOpts, enemyFirst: true, encounterFaction: 'pirates' });
+                    };
+                } else {
+                    // Genuine find — credits
+                    const credits = encounter._abandonedCredits || randomInt(100, 300);
+                    gameState.credits += credits;
+                    retreatBtn0.style.display = 'none';
+                    titleEl0.textContent = 'Salvage Found';
+                    titleEl0.style.color = '#ffdd44';
+                    bodyEl0.innerHTML = `<p style="color:#ffdd44;"><strong>Lucky find!</strong> The hold contains valuables — you extract what you can.</p>
+                        <p style="color:#ffdd44;font-size:0.9em;margin-top:0.3em;">+${credits} credits</p>`;
+                    engageBtn0.textContent = 'Continue';
+                    engageBtn0.onclick = () => { closeModal0(); onContinue(); };
+                }
+            };
+            retreatBtn0.onclick = () => { closeModal0(); onContinue(); };
+            modalEl0.style.display = 'flex';
+            return;
+        }
 
         // Soldiers with non-negative fame: show a clearance modal instead of silent pass
         if (encounter.faction === 'soldiers' && (gameState.fame || 0) >= 0) {
@@ -1215,9 +1274,10 @@ const GameController = {
         const faction = _defeatedEncounterInfo ? _defeatedEncounterInfo.faction : null;
         const factionData = faction ? CONSTANTS.FACTIONS.find(f => f.id === faction) : null;
         const isPirates = faction === 'pirates';
+        const isAliens  = faction === 'aliens';
         let rewardLine = '';
         if (combat.won && !combat.playerRetreated) {
-            if (isPirates) {
+            if (isPirates || isAliens) {
                 const contractsEarned = enemyDestroyed * 250;
                 rewardLine = contractsEarned > 0
                     ? `<p style="color:#44ffdd;margin-top:0.5em;">+${contractsEarned} contracts (${enemyDestroyed} × 250 — collect at courthouse)</p>`
@@ -1239,6 +1299,17 @@ const GameController = {
             ? `<p style="color:#aaff44;margin-top:0.5em;">+${expGained} EXP earned this battle</p>`
             : '';
 
+        // Engineering perk: roll to resurrect each destroyed player ship
+        const resurChance = engineeringResurrectionChance(gameState.perks || []);
+        const isTemp = s => s.isBomb || s.isTorpedo || s.isSwarmlet || s.isDrone || s.isMirror;
+        const deadPlayerShips = allPlayerShips.filter(s => !s.alive && !isTemp(s));
+        _engineeringRevived = resurChance > 0
+            ? deadPlayerShips.filter(() => Math.random() < resurChance)
+            : [];
+        const engineeringLine = _engineeringRevived.length > 0
+            ? `<p style="color:#44ffaa;margin-top:0.5em;">Engineering: ${_engineeringRevived.map(s => s.name).join(', ')} restored to full health!</p>`
+            : '';
+
         bodyEl.innerHTML = `
             <div style="margin-bottom:0.75em;">
                 <div style="color:#44ccff;font-weight:bold;margin-bottom:0.2em;">Your Fleet</div>
@@ -1251,7 +1322,8 @@ const GameController = {
                 ${UISystem.renderShipTable(allEnemyShips, { bars: true })}
             </div>
             ${rewardLine}
-            ${expLine}`;
+            ${expLine}
+            ${engineeringLine}`;
 
         document.getElementById('combatResultModal').style.display = 'flex';
     },
@@ -1263,14 +1335,21 @@ const GameController = {
         gameState.playerShips = [...combat.playerShips, ...combat.fleedPlayerShips];
         gameState.enemyShips = combat.enemyShips;
 
-        // Shields fully restore; hull repaired by Engineering perk fraction (no full auto-restore)
-        const repairFrac = engineeringRepairFraction(gameState.perks || []);
+        // Fully restore hull and shields on all surviving ships
         gameState.playerShips.forEach(s => {
             if (s.alive) {
+                s.hull = s.maxHull;
                 s.shields = s.maxShields;
-                s.hull = Math.min(s.hull + Math.round(s.maxHull * repairFrac), s.maxHull);
             }
         });
+
+        // Engineering perk: restore ships that were rolled for resurrection in the modal
+        _engineeringRevived.forEach(s => {
+            s.alive = true;
+            s.hull = s.maxHull;
+            s.shields = s.maxShields;
+        });
+        _engineeringRevived = [];
 
         cancelAnimationFrame(animationFrameId);
 
@@ -1294,7 +1373,7 @@ const GameController = {
                 }
 
                 const factionDataEC = CONSTANTS.FACTIONS.find(f => f.id === _defeatedEncounterInfo.faction);
-                if (_defeatedEncounterInfo.faction === 'pirates') {
+                if (_defeatedEncounterInfo.faction === 'pirates' || _defeatedEncounterInfo.faction === 'aliens') {
                     const isTemp = s => s.isBomb || s.isTorpedo || s.isSwarmlet || s.isDrone || s.isMirror;
                     const enemyDestroyed = [...combat.enemyShips, ...combat.fleedEnemyShips].filter(s => !isTemp(s) && !s.alive).length;
                     gameState.contracts = (gameState.contracts || 0) + enemyDestroyed * 250;

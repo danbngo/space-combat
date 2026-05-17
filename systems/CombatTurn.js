@@ -164,7 +164,9 @@ Combat.prototype._checkNewExpEvents = function() {
         for (const ship of [...this.enemyShips, ...this.fleedEnemyShips]) {
             if (!ship.alive && !isTemp(ship) && !this._expAwardedFor.has(ship)) {
                 this._expAwardedFor.add(ship);
-                this.awardCombatExp(CONSTANTS.EXP_PER_ENEMY_DISABLED || 10, ship);
+                const isAlien = ship.shipType && ship.shipType.startsWith('Alien');
+                const expAmt = isAlien ? (CONSTANTS.EXP_PER_ALIEN_DISABLED || 25) : (CONSTANTS.EXP_PER_ENEMY_DISABLED || 10);
+                this.awardCombatExp(expAmt, ship);
             }
         }
 };

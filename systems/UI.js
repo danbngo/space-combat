@@ -281,10 +281,10 @@ class UISystem {
             {
                 key: 'Engineering',
                 title: 'Engineering',
-                desc: 'Repair hull damage after each combat.',
+                desc: 'Chance to restore destroyed ships to full health after each combat.',
                 effect: () => {
-                    const f = engineeringRepairFraction(perks);
-                    return `Post-combat hull repair: ${Math.round(f * 100)}% of max hull`;
+                    const c = engineeringResurrectionChance(perks);
+                    return `Post-combat resurrection chance: ${Math.round(c * 100)}% per destroyed ship`;
                 },
             },
         ];
@@ -472,6 +472,9 @@ class UISystem {
         const markersEl = document.getElementById('travelEncounterMarkers');
         if (markersEl) {
             markersEl.innerHTML = (encounters || []).map(enc => {
+                if (enc.faction === 'abandoned_ship') {
+                    return `<div class="travel-encounter-marker" style="left:${enc._crossT * 100}%;border-color:#888;color:#ccc;" data-tooltip="Abandoned ship sighted">?</div>`;
+                }
                 const fd = CONSTANTS.FACTIONS.find(f => f.id === enc.faction);
                 const color = fd ? fd.color : '#ffffff';
                 const tipText = fd ? `${fd.name} encounter (${enc.size} ships)` : 'Unknown encounter';

@@ -297,6 +297,13 @@ class SpaceTravel {
             encounters.push({ faction, size, fleetStrength, _crossT: crossT, leaderType: pickLeader(faction, fleetStrength), done: false });
         }
 
+        // 35% chance of one abandoned ship encounter per route (outside queen routes)
+        if (Math.random() < 0.35) {
+            const crossT = randomFloat(0.15, 0.85);
+            const credits = fleetStrength <= 3 ? randomInt(100, 300) : fleetStrength <= 6 ? randomInt(250, 600) : randomInt(500, 1200);
+            encounters.push({ faction: 'abandoned_ship', size: 0, fleetStrength, _crossT: crossT, _abandonedCredits: credits, done: false });
+        }
+
         return encounters.sort((a, b) => a._crossT - b._crossT);
     }
 
@@ -390,6 +397,13 @@ class SpaceTravel {
 
             fleet.push(ship);
         }
+        // 25% chance the fleet arrives already battle-damaged
+        if (Math.random() < 0.25) {
+            fleet.forEach(ship => {
+                ship.hull = Math.max(1, Math.round(ship.maxHull * (0.01 + Math.random() * 0.99)));
+            });
+        }
+
         assignFleetNames(fleet);
         return fleet;
     }
