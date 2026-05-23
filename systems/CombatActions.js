@@ -1627,8 +1627,10 @@ Combat.prototype.playerRamShip = function(rammer, target) {
 Combat.prototype.performRam = function(rammer, target, moveDistance) {
         this._decloakDephase(rammer);
         this.addFloatingText('Ram!', '#ff8800', rammer.x, rammer.y - 12);
-        // Random 1–engine damage; target takes 2× — both bypass shields (direct hull)
-        const ramDmg = randomInt(1, rammer.engine);
+        // Damage scales by the distance traveled: close rams do much less damage, max-range rams do full damage.
+        const baseRamDmg = randomInt(1, rammer.engine);
+        const distanceFactor = Math.min(1, Math.max(0, moveDistance / rammer.engine));
+        const ramDmg = Math.max(1, Math.round(baseRamDmg * distanceFactor));
         const targetDmg = ramDmg * 2;
 
         const ang = Math.atan2(target.y - rammer.y, target.x - rammer.x);

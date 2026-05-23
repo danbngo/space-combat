@@ -230,14 +230,6 @@ const CONSTANTS_SHIPS = {
             creditMult: 1,
         },
         {
-            id: 'soldiers',
-            name: 'Soldiers',
-            description: 'Military patrols operating under standing orders. Usually allow passage with a clean record. Very low credit yield.',
-            color: '#44ff44',
-            shipTypes: ['Corvette', 'Destroyer', 'Fighter'],
-            creditMult: 0.25,
-        },
-        {
             id: 'smugglers',
             name: 'Smugglers',
             description: 'Contraband runners evading law enforcement. Well-armed if cornered. Defeating them yields high credits.',
@@ -271,11 +263,6 @@ const CONSTANTS_SHIPS = {
             low:  ['Fighter', 'Corvette'],
             mid:  ['Corvette', 'Destroyer', 'Interceptor'],
             high: ['Destroyer', 'Jammer', 'Battleship', 'Carrier'],
-        },
-        soldiers:  {
-            low:  ['Fighter', 'Corvette'],
-            mid:  ['Corvette', 'Destroyer'],
-            high: ['Destroyer', 'Battleship', 'Carrier'],
         },
         smugglers: {
             low:  ['Blockade Runner', 'Scout'],

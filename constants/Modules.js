@@ -59,7 +59,6 @@ const CONSTANTS_MODULES = {
         pirates:   ['chaingun_mount', 'afterburner_drive', 'bomb_launcher', 'rocket_pod', 'deflector_array', 'plasma_cannon_mount'],
         merchants: ['hull_regen_bay', 'shield_regen_coil', 'repair_bay', 'drone_bay', 'collision_dampeners'],
         police:    ['mark_module', 'emp_blast_drive', 'tractor_beam_emitter', 'flash_emitter', 'deflector_array', 'combat_ai'],
-        soldiers:  ['rocket_pod', 'collision_dampeners', 'plasma_cannon_mount', 'mark_module', 'torpedo_launcher'],
         smugglers: ['cloak_drive', 'afterburner_drive', 'debris_launcher', 'flash_emitter', 'collision_dampeners', 'salvage_module', 'torpedo_launcher'],
         aliens:    ['alien_blink', 'alien_swap', 'alien_mirror', 'alien_doom', 'alien_phase', 'alien_absorb', 'alien_teleport', 'alien_stasis', 'alien_ravager', 'alien_scatter', 'alien_attractor', 'possess_module', 'alien_swarm', 'alien_webbing', 'alien_timeslip', 'alien_frenzy', 'alien_neutralize', 'alien_gamma_ray'],
     },

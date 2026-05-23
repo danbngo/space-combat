@@ -96,10 +96,16 @@ class Ship {
         this.level++;
         const mults = CONSTANTS.SHIP_LEVEL_MULTS;
         const mult = mults[this.level - 1];
-        this.maxHull = Math.max(1, Math.round(this._baseMaxHull * mult));
-        this.hull = Math.min(this.hull, this.maxHull);
-        this.maxShields = Math.max(0, Math.round(this._baseMaxShields * mult));
-        this.shields = Math.min(this.shields, this.maxShields);
+        const newMaxHull = Math.max(1, Math.round(this._baseMaxHull * mult));
+        const hullDelta = newMaxHull - this.maxHull;
+        this.maxHull = newMaxHull;
+        this.hull = Math.min(this.hull + hullDelta, this.maxHull);
+
+        const newMaxShields = Math.max(0, Math.round(this._baseMaxShields * mult));
+        const shieldDelta = newMaxShields - this.maxShields;
+        this.maxShields = newMaxShields;
+        this.shields = Math.min(this.shields + shieldDelta, this.maxShields);
+
         this.laserDamage = Math.max(1, Math.round(this._baseLaserDamage * mult));
         this.radar = Math.max(1, Math.round(this._baseRadar * mult));
         this.engine = Math.max(5, Math.round(this._baseEngine * mult));

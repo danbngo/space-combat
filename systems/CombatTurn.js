@@ -12,6 +12,20 @@ Combat.prototype.applyStartOfTurnEffects = function(ship) {
         }
 };
 
+Combat.prototype.getActivePlayerShip = function() {
+        const isValid = ship => ship && ship.alive && !ship.isBomb && !ship.isSwarmlet && !ship.isTorpedo && ship.actionsRemaining > 0;
+        if (this.currentShipIndex >= 0 && this.currentShipIndex < this.playerShips.length) {
+            const current = this.playerShips[this.currentShipIndex];
+            if (isValid(current)) return current;
+        }
+        const nextIndex = this.playerShips.findIndex(isValid);
+        if (nextIndex >= 0) {
+            this.currentShipIndex = nextIndex;
+            return this.playerShips[nextIndex];
+        }
+        return null;
+};
+
 Combat.prototype.nextPlayerShip = function() {
         if (this.state !== COMBAT_STATE.PLAYER_TURN) return;
 

@@ -153,10 +153,6 @@ class UISystem {
         const bountyHtml = bounty > 0
             ? `<p style="color:#ff4444;font-weight:bold;">Bounty: ${bounty} cr</p>`
             : '';
-        const fame = gameState.fame || 0;
-        const fameColor = fame > 0 ? '#44ff88' : fame < 0 ? '#ff6644' : '#aaa';
-        const fameSign = fame > 0 ? '+' : '';
-        const fameHtml = `<p>Fame: <span style="color:${fameColor};font-weight:${fame !== 0 ? 'bold' : 'normal'};">${fameSign}${fame}</span></p>`;
         const contracts = gameState.contracts || 0;
         const contractsHtml = contracts > 0
             ? `<p>Contracts: <span style="color:#44ffdd;font-weight:bold;">${contracts}</span></p>`
@@ -196,7 +192,6 @@ class UISystem {
                 ${nameHtml}
                 <p>Credits: ${gameState.credits} &nbsp;·&nbsp; <span style="color:#aaa;">Day ${day}</span></p>
                 ${factionHtml}
-                ${fameHtml}
                 ${bountyHtml}
                 ${contractsHtml}
                 ${expBarHtml}

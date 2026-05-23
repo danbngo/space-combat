@@ -74,7 +74,6 @@ const GameController = {
             state: GAME_STATE.TITLE,
             credits: CONSTANTS.PLAYER_STARTING_CREDITS,
             bounty: 0,
-            fame: 0,
             contracts: 0,
             day: 1,
             playerFaction: null,
@@ -176,6 +175,7 @@ const GameController = {
             startingShip = new Ship(0, 0, true);
         }
         startingShip._buyPrice = CONSTANTS.NEW_SHIP_BASE_COST;
+        startingShip.upgradeLevel();
         gameState.playerShips  = [startingShip];
         if (factionData && factionData.startingPerk) {
             gameState.perks = [factionData.startingPerk];
@@ -441,7 +441,7 @@ const GameController = {
                     engageBtn0.textContent = 'Fight';
                     engageBtn0.onclick = () => {
                         closeModal0();
-                        _defeatedEncounterInfo = { faction: 'pirates', size: ambushSize, fameDelta: 1, isQueenFight: false };
+                        _defeatedEncounterInfo = { faction: 'pirates', size: ambushSize, isQueenFight: false };
                         gameState.enemyShips = ambushFleet;
                         _travelContinuation = onContinue;
                         this.startCombat({ ..._hazardOpts, enemyFirst: true, encounterFaction: 'pirates' });
@@ -464,56 +464,6 @@ const GameController = {
             return;
         }
 
-        // Soldiers with non-negative fame: show a clearance modal instead of silent pass
-        if (encounter.faction === 'soldiers' && (gameState.fame || 0) >= 0) {
-            const computeFameDelta = (faction, playerInitiated) => {
-                if (faction === 'pirates') return 1;
-                if (faction === 'smugglers') return playerInitiated ? 1 : 0;
-                return playerInitiated ? -1 : 0;
-            };
-            const preGenFleetSoldier = SpaceTravel.generateEnemyFleet(encounter);
-            const startCombatSoldier = (addBounty, combatOptions = {}, fameDelta = 0) => {
-                if (addBounty && !isPoliceFaction) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
-                removeEncounterFn();
-                _defeatedEncounterInfo = { faction: encounter.faction, size: encounter.size, fameDelta, isQueenFight: false };
-                gameState.enemyShips = preGenFleetSoldier;
-                _travelContinuation = onContinue;
-                this.startCombat({ ..._hazardOpts, ...combatOptions, encounterFaction: encounter.faction });
-            };
-            const removeEncounterFn = () => {};
-            const modalEl2   = document.getElementById('encounterModal');
-            const titleEl2   = document.getElementById('encounterModalTitle');
-            const bodyEl2    = document.getElementById('encounterModalBody');
-            const engageBtn2 = document.getElementById('encounterEngageBtn');
-            const retreatBtn2 = document.getElementById('encounterRetreatBtn');
-            const closeModal2 = () => { modalEl2.style.display = 'none'; retreatBtn2.style.display = ''; retreatBtn2.textContent = 'Turn Back'; };
-            titleEl2.textContent = 'Soldier Patrol';
-            titleEl2.style.color = '#aaaaff';
-            const soldierFaction = CONSTANTS.FACTIONS.find(f => f.id === 'soldiers');
-            if (soldierFaction && soldierFaction.description) {
-                titleEl2.setAttribute('data-tooltip-title', soldierFaction.name);
-                titleEl2.setAttribute('data-tooltip-body', soldierFaction.description);
-                titleEl2.style.cursor = 'help';
-            }
-            bodyEl2.innerHTML = `<p>A soldier patrol of <strong>${encounter.size} ships</strong> scans your transponder.</p>
-                <p style="color:#00ff88;font-size:0.88em;margin-top:0.3em;">✓ Cleared to pass — your record is clean.</p>`;
-            engageBtn2.textContent = 'Attack';
-            retreatBtn2.textContent = 'Pass';
-            retreatBtn2.style.display = '';
-            engageBtn2.onclick = () => { closeModal2(); startCombatSoldier(false, { enemyFirst: false }, computeFameDelta('soldiers', true)); };
-            retreatBtn2.onclick = () => { closeModal2(); removeEncounterFn(); onContinue(); };
-            modalEl2.style.display = 'flex';
-            return;
-        }
-
-        // fameDelta on victory: +1 for pirates always; +1 for smugglers if player initiated;
-        // -1 for all others if player initiated; 0 if defending
-        const computeFameDelta = (faction, playerInitiated) => {
-            if (faction === 'pirates') return 1;
-            if (faction === 'smugglers') return playerInitiated ? 1 : 0;
-            return playerInitiated ? -1 : 0;
-        };
-
         // Pre-generate enemy fleet so detection roll uses real radar totals,
         // and the same fleet objects are used in combat.
         const preGenFleet = SpaceTravel.generateEnemyFleet(encounter);
@@ -521,12 +471,11 @@ const GameController = {
         const enemyRadar  = preGenFleet.reduce((sum, s) => sum + s.radar, 0);
         const undetected  = playerRadar > enemyRadar;
 
-        const startCombatWith = (addBounty, combatOptions = {}, fameDelta = 0) => {
+        const startCombatWith = (addBounty, combatOptions = {}) => {
             if (addBounty && !isPoliceFaction) gameState.bounty = (gameState.bounty || 0) + CONSTANTS.FLEET_ATTACK_BOUNTY;
             _defeatedEncounterInfo = {
                 faction:      encounter.faction,
                 size:         encounter.size,
-                fameDelta,
                 isQueenFight: encounter.isQueenFight || false,
             };
             gameState.enemyShips = preGenFleet;
@@ -673,7 +622,6 @@ const GameController = {
             if (encounter.faction === 'pirates')   fleetDesc = `A pirate fleet of <strong>${encounter.size} ships</strong> ahead.`;
             if (encounter.faction === 'police')    fleetDesc = `A police patrol of <strong>${encounter.size} ships</strong> ahead.`;
             if (encounter.faction === 'merchants') fleetDesc = `A merchant convoy of <strong>${encounter.size} ships</strong> ahead.`;
-            if (encounter.faction === 'soldiers')  fleetDesc = `A soldier patrol of <strong>${encounter.size} ships</strong> ahead.`;
             if (encounter.faction === 'smugglers') fleetDesc = `A smuggler convoy of <strong>${encounter.size} ships</strong> ahead.`;
 
             const isNeutral = encounter.faction === 'merchants';
@@ -708,7 +656,6 @@ const GameController = {
             retreatBtn.style.display = '';
 
             engageBtn.onclick = () => {
-                const fameDelta = computeFameDelta(encounter.faction, true);
                 const ambushSuccess = Math.random() < 0.5;
                 retreatBtn.style.display = 'none';
                 if (ambushSuccess) {
@@ -717,14 +664,14 @@ const GameController = {
                     bodyEl.innerHTML = `<p style="color:#00ff88;"><strong>✓ Ambush successful!</strong></p>
                         <p style="color:#aaa;font-size:0.88em;">Enemy caught off-guard — shields down, facing away.</p>`;
                     engageBtn.textContent = 'Continue';
-                    engageBtn.onclick = () => { closeModal(); startCombatWith(false, { ambush: true, enemyFirst: false }, fameDelta); };
+                    engageBtn.onclick = () => { closeModal(); startCombatWith(false, { ambush: true, enemyFirst: false }); };
                 } else {
                     titleEl.textContent = 'Ambush Failed!';
                     titleEl.style.color = '#ff4444';
                     bodyEl.innerHTML = `<p style="color:#ff4444;"><strong>✗ Ambush failed!</strong></p>
                         <p style="color:#aaa;font-size:0.88em;">They spotted you first — prepare for their assault!</p>`;
                     engageBtn.textContent = 'Fight';
-                    engageBtn.onclick = () => { closeModal(); startCombatWith(false, { enemyFirst: true }, fameDelta); };
+                    engageBtn.onclick = () => { closeModal(); startCombatWith(false, { enemyFirst: true }); };
                 }
             };
 
@@ -743,7 +690,7 @@ const GameController = {
                         bodyEl.innerHTML = `<p style="color:#ff4444;"><strong>✗ Sneak failed!</strong></p>
                             <p style="color:#aaa;font-size:0.88em;">They spotted you — prepare for combat.</p>`;
                         engageBtn.textContent = 'Fight';
-                        engageBtn.onclick = () => { closeModal(); startCombatWith(false, { enemyFirst: true }, computeFameDelta(encounter.faction, false)); };
+                        engageBtn.onclick = () => { closeModal(); startCombatWith(false, { enemyFirst: true }); };
                     }
                 };
             }
@@ -754,14 +701,11 @@ const GameController = {
             </p>`;
 
             const playerBounty = gameState.bounty || 0;
-            const playerFame   = gameState.fame   || 0;
             let willAttack = false;
             if (encounter.faction === 'pirates') {
                 willAttack = isPirateFaction ? false : Math.random() < 0.5;
             } else if (encounter.faction === 'police' && playerBounty > 0) {
                 willAttack = Math.random() < 0.5;
-            } else if (encounter.faction === 'soldiers' && playerFame < 0) {
-                willAttack = Math.random() < Math.min(1, -playerFame / 100);
             }
 
             if (willAttack) {
@@ -770,9 +714,6 @@ const GameController = {
                     msg = `A pirate fleet of <strong>${encounter.size} ships</strong> is moving to intercept!`;
                 else if (encounter.faction === 'police')
                     msg = `A police patrol of <strong>${encounter.size} ships</strong> has detected your bounty and is closing in!`;
-                else if (encounter.faction === 'soldiers')
-                    msg = `A soldier patrol of <strong>${encounter.size} ships</strong> has marked you as an enemy of the state!`;
-
                 if (encounter.faction === 'pirates') {
                     const toll = Math.floor(gameState.credits * (0.25 + Math.random() * 0.5));
                     bodyEl.innerHTML = `${detLine}<p>${msg}</p>
@@ -784,7 +725,7 @@ const GameController = {
 
                     engageBtn.onclick = () => {
                         closeModal();
-                        startCombatWith(false, { enemyFirst: true }, computeFameDelta(encounter.faction, false));
+                        startCombatWith(false, { enemyFirst: true });
                     };
                     retreatBtn.onclick = () => {
                         closeModal();
@@ -798,7 +739,7 @@ const GameController = {
 
                     engageBtn.onclick = () => {
                         closeModal();
-                        startCombatWith(false, { enemyFirst: true }, computeFameDelta(encounter.faction, false));
+                        startCombatWith(false, { enemyFirst: true });
                     };
                 }
             } else {
@@ -813,12 +754,9 @@ const GameController = {
                 } else if (encounter.faction === 'merchants') {
                     msg = `A merchant convoy of <strong>${encounter.size} ships</strong> is on the route.`;
                     attackLabel = `Attack (+${CONSTANTS.FLEET_ATTACK_BOUNTY} bounty)`;
-                } else if (encounter.faction === 'soldiers') {
-                    msg = `A soldier patrol of <strong>${encounter.size} ships</strong> is watching you closely (fame: ${playerFame}).`;
-                    attackLabel = `Attack (−1 fame)`;
                 } else if (encounter.faction === 'smugglers') {
                     msg = `A smuggler convoy of <strong>${encounter.size} ships</strong> is on the route.`;
-                    attackLabel = `Attack (+1 fame)`;
+                    attackLabel = 'Attack';
                 }
 
                 // Police can't attack non-criminals (pirates + smugglers are criminals); pirates are friendly with other pirates
@@ -846,7 +784,7 @@ const GameController = {
 
                 engageBtn.onclick = () => {
                     closeModal();
-                    startCombatWith(givesBounty, { enemyFirst: false }, computeFameDelta(encounter.faction, true));
+                    startCombatWith(givesBounty, { enemyFirst: false });
                 };
 
                 retreatBtn.onclick = () => {
@@ -884,7 +822,7 @@ const GameController = {
                 console.log('[click] ignored: animating');
                 return;
             }
-            const activeShip     = combat.playerShips[combat.currentShipIndex];
+            const activeShip     = combat.getActivePlayerShip ? combat.getActivePlayerShip() : combat.playerShips[combat.currentShipIndex];
             const mode           = combat.playerMode;
             const clickedShip    = combat.getShipAtPosition(wx, wy, mode);
             const clickedAsteroid = mode === 'salvage' ? null : combat.getAsteroidAtPosition(wx, wy);
@@ -1301,7 +1239,6 @@ const GameController = {
 
         // Engineering perk: roll to resurrect each destroyed player ship
         const resurChance = engineeringResurrectionChance(gameState.perks || []);
-        const isTemp = s => s.isBomb || s.isTorpedo || s.isSwarmlet || s.isDrone || s.isMirror;
         const deadPlayerShips = allPlayerShips.filter(s => !s.alive && !isTemp(s));
         _engineeringRevived = resurChance > 0
             ? deadPlayerShips.filter(() => Math.random() < resurChance)
@@ -1356,9 +1293,6 @@ const GameController = {
         if (combat.won && !combat.playerRetreated) {
             const rewards = combat.getRewards();
             if (_defeatedEncounterInfo) {
-                const fameDelta = _defeatedEncounterInfo.fameDelta || 0;
-                if (fameDelta !== 0) gameState.fame = (gameState.fame || 0) + fameDelta;
-
                 // Queen fight win = game won
                 if (_defeatedEncounterInfo.isQueenFight) {
                     _defeatedEncounterInfo = null;

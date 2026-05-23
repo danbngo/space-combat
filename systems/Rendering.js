@@ -91,7 +91,7 @@ class RenderingSystem {
 
             // Debug logging during targeting modes
             if (combat && combat.playerMode && !this._mouseIsDown) {
-                const active = combat.playerShips[combat.currentShipIndex];
+                const active = combat.getActivePlayerShip ? combat.getActivePlayerShip() : combat.playerShips[combat.currentShipIndex];
                 if (active && active.alive) {
                     const hovered = [...combat.playerShips, ...combat.enemyShips].find(
                         s => s.alive && distance(s.x, s.y, world.x, world.y) <= CONSTANTS.SHIP_SIZE * 3 * (s.sizeMult ?? 1.0)

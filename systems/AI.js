@@ -68,16 +68,9 @@ class AISystem {
 
     // Move toward nearest arena edge — used when fleeing, constrained to movement oval
     static flee(aiShip, combat) {
-        const ang = Math.atan2(aiShip.y - combat.centerY, aiShip.x - combat.centerX);
-        const farX = aiShip.x + Math.cos(ang) * aiShip.engine * 20;
-        const farY = aiShip.y + Math.sin(ang) * aiShip.engine * 20;
-        const dest = clampToMovementOval(aiShip, farX, farY);
-        const moveDist = distance(aiShip.x, aiShip.y, dest.x, dest.y);
-        aiShip.targetX = dest.x;
-        aiShip.targetY = dest.y;
-        aiShip.targetRotation = ang;
-        aiShip.isMoving = true;
-        console.log(`[AI ${aiShip.name}] FLEE toward arena edge ang=${(ang * 180 / Math.PI).toFixed(0)}° dist=${moveDist.toFixed(0)}`);
+        // Fleeing is disabled for enemy ships.
+        // This method remains as a placeholder so no action is taken if called unexpectedly.
+        return;
     }
 
     // Nudge a destination away from nearby asteroids and allied ships, then re-clamp to oval
@@ -605,10 +598,9 @@ class AISystem {
         const isAlien = aiShip.shipType && aiShip.shipType.startsWith('Alien');
 
         // Deterministic flee: critical hull, or shields gone + hull below half (aliens never flee)
+        // Disabled: enemies will continue choosing attack or reposition instead of doing nothing.
         if (!isAlien && (hullPct < 0.25 || (aiShip.shields <= 0 && hullPct < 0.5))) {
-            console.log(`[AI ${aiShip.name}] FLEE (critical) hull=${aiShip.hull}/${aiShip.maxHull} shields=${aiShip.shields}`);
-            this.flee(aiShip, combat);
-            return;
+            console.log(`[AI ${aiShip.name}] CRITICAL (low hull) hull=${aiShip.hull}/${aiShip.maxHull} shields=${aiShip.shields}`);
         }
 
         // Find nearest player ship
@@ -628,9 +620,7 @@ class AISystem {
             const retreatThreshold = healthFactor * proximityFactor * CONSTANTS.AI_RETREAT_CHANCE;
 
             if (Math.random() < retreatThreshold) {
-                console.log(`[AI ${aiShip.name}] RETREAT (tactical) threshold=${retreatThreshold.toFixed(2)} hp=${aiShip.hull}/${aiShip.maxHull}`);
-                this.flee(aiShip, combat);
-                return;
+                console.log(`[AI ${aiShip.name}] RETREAT CHECK (tactical) threshold=${retreatThreshold.toFixed(2)} hp=${aiShip.hull}/${aiShip.maxHull}`);
             }
         }
 

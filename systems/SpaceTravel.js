@@ -206,10 +206,9 @@ class SpaceTravel {
         const humanPool = Math.max(0, 100 - alienWeight);
 
         const factionWeights = {
-            pirates:   humanPool * 0.28,
-            merchants: humanPool * 0.20,
-            police:    humanPool * 0.22,
-            soldiers:  humanPool * 0.10,
+            pirates:   humanPool * 0.30,
+            merchants: humanPool * 0.25,
+            police:    humanPool * 0.25,
             smugglers: humanPool * 0.20,
             aliens:    alienWeight,
         };

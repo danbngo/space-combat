@@ -9,7 +9,7 @@ UISystem.updateCombatScreen = function(gameState, combat) {
 
         const isPlayerTurn  = combat.state === COMBAT_STATE.PLAYER_TURN;
         const isResolving   = combat.state === COMBAT_STATE.RESOLVING || combat.state === COMBAT_STATE.ENEMY_TURN;
-        const activeTurnShip = isPlayerTurn ? combat.playerShips[combat.currentShipIndex] : null;
+        const activeTurnShip = isPlayerTurn ? (combat.getActivePlayerShip ? combat.getActivePlayerShip() : combat.playerShips[combat.currentShipIndex]) : null;
         const playerAlive   = combat.playerShips.filter(s => s.alive).length;
         const enemyAlive    = combat.enemyShips.filter(s => s.alive).length;
 
